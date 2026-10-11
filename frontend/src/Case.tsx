@@ -365,7 +365,7 @@ ${planMd(s.plan)}
   const sheetDocs = (s.documents ?? []).filter((d) => d.kind === 'sheet')
   const update = dataUpdateLabel(s.text)
   const prev = steps.slice(0, atIdx).reverse().find(enabled)
-  const courtroom = !simple && s.ghosts.length > 0 && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />
+  const courtroom = !simple && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />
   const numbers = sheets.length > 0 && (
     <Suspense fallback={<div className="entry space-y-2" aria-label="Loading your numbers"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
       {sheets.map((d) => <Numbers key={d.id} doc={d} />)}
@@ -457,7 +457,7 @@ ${planMd(s.plan)}
     ),
     council: (
       <>
-        {courtroom || <section className="entry text-ink-soft">{finished ? 'No council was summoned.' : <LiveSteps s={s} since={since} />}</section>}
+        {finished ? (s.ghosts.length ? courtroom : <section className="entry text-ink-soft">No council was summoned.</section>) : <section className="entry text-ink-soft"><LiveSteps s={s} since={since} /></section>}
         {s.ghosts.length > 0 && (
           <section id="council" className="entry">
             <h2 className="font-serif text-[28px]">The council assembled</h2>
@@ -475,7 +475,6 @@ ${planMd(s.plan)}
     ),
     rulings: (
       <>
-        {!finished && courtroom}
         <section id="testimony" className="entry">
           <h2 className="font-serif text-[28px]">Testimony and rulings</h2>
           <div className="mt-2 divide-y divide-hair">
@@ -600,6 +599,7 @@ ${planMd(s.plan)}
         )}
         <span className="ml-auto hidden text-xs text-ink-soft sm:inline">Use ← → to move between steps</span>
       </div>
+      {!finished && courtroom && <div className="live-stage no-print mb-4">{courtroom}</div>}
       <StepBar steps={steps} at={at} live={live} enabled={enabled} go={go} />
 
       <div className="sheet mt-2 min-w-0 overflow-hidden px-4 sm:px-8"
