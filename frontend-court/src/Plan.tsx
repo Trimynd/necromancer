@@ -111,7 +111,7 @@ const firstPara = (t?: string) => t?.split(/\n\s*\n/).find((x) => x.trim())?.tri
 
 // ---- 90-day plan ----
 const WEEKS = 13
-const PHASE_COLORS = ['var(--ghost)', 'var(--caution)', 'var(--go)', 'var(--seal)', '#6250d6']
+const PHASE_COLORS = ['var(--ghost)', 'var(--caution)', 'var(--go)', 'var(--seal)', '#3b82f6']
 const wk = (n: unknown, lo = 1) => Math.min(WEEKS, Math.max(lo, Math.round(Number(n)) || lo))
 const span = (a?: number, b?: number) => { const s0 = wk(a); return [s0, wk(b ?? s0, s0)] as const }
 const weeksText = (t: { start_week?: number; end_week?: number }) => { const [a, b] = span(t.start_week, t.end_week); return a === b ? `Week ${a}` : `Weeks ${a}–${b}` }

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { DOC_ICON, familyOf, isMock, kindOf, loadRecent, saveRecent, startCase, uploadDocuments, type Recent, type Stage as Lower } from './lib'
-import { MOCK_TEXT } from './mock'
+import { connectSheet, DOC_ICON, docLabel, familyOf, isMock, kindOf, loadRecent, mockQ, saveRecent, startCase, uploadDocuments, type Doc, type Recent, type Stage as Lower } from './lib'
+import { MOCK_SHEET, MOCK_TEXT } from './mock'
 
 export function Shell({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? '')
@@ -86,12 +86,17 @@ export function Home() {
   const [fileMsg, setFileMsg] = useState('')
   const [strict, setStrict] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [sheetUrl, setSheetUrl] = useState('')
+  const [sheets, setSheets] = useState<Doc[]>([])
+  const [sheetErr, setSheetErr] = useState('')
+  const [sheetBusy, setSheetBusy] = useState(false)
+  const attached = files.length + sheets.length
   const urlOk = /^https?:\/\/\S+\.\S+/.test(url.trim())
   const t = text.trim()
   // Short questions ("What is UPI?") are allowed: the router answers them directly. With documents attached,
   // a couple of words ("Is this viable?") is enough. A website alone is enough too; both go together.
   const urlBad = !!url.trim() && !urlOk
-  const ok = !urlBad && t.length <= 4000 && (t.length >= (files.length ? 2 : 5) || (urlOk && !t))
+  const ok = !urlBad && t.length <= 4000 && (t.length >= (attached ? 2 : 5) || (urlOk && !t))
   const st = STAGES.find((x) => x.name === stage)!
 
   const addFiles = (list: FileList | null) => {
@@ -103,7 +108,7 @@ export function Home() {
       if (!ACCEPT.includes(ext)) msgs.push(`${f.name}: only PDF, CSV, TXT, MD or DOCX files.`)
       else if (f.size > MAX_MB * 1024 * 1024) msgs.push(`${f.name} is ${fmtSize(f.size)}; the limit is ${MAX_MB} MB.`)
       else if (next.some((x) => x.name === f.name && x.size === f.size)) continue
-      else if (next.length >= MAX_FILES) { msgs.push(`Up to ${MAX_FILES} files, please.`); break }
+      else if (next.length + sheets.length >= MAX_FILES) { msgs.push(`Up to ${MAX_FILES} files, please.`); break }
       else next.push(f)
     }
     setFiles(next)
@@ -112,6 +117,21 @@ export function Home() {
 
   useEffect(() => { document.title = 'Necromancer' }, [])
 
+  const addSheet = async (sample = false) => {
+    const u = sheetUrl.trim()
+    if (!sample && !/^https:\/\/docs\.google\.com\/spreadsheets\//.test(u)) return setSheetErr('Paste a Google Sheets link (https://docs.google.com/spreadsheets/…).')
+    if (attached >= MAX_FILES) return setSheetErr(`Up to ${MAX_FILES} files or sheets, please.`)
+    setSheetBusy(true)
+    setSheetErr('')
+    try {
+      const got = sample || isMock() ? [MOCK_SHEET] : await connectSheet(u)
+      setSheets((cur) => [...cur, ...got.filter((d) => !cur.some((x) => x.id === d.id))])
+      setSheetUrl('')
+    } catch (e) {
+      setSheetErr(e instanceof Error ? e.message : String(e))
+    } finally { setSheetBusy(false) }
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!ok || busy) return
@@ -119,12 +139,12 @@ export function Home() {
     setErr('')
     try {
       const docs = files.length ? await uploadDocuments(files) : []
-      const document_ids = docs.map((d) => d.id)
+      const document_ids = [...sheets.map((d) => d.id), ...docs.map((d) => d.id)]
       const u = urlOk ? url.trim() : undefined
       const lc = stage.toLowerCase() as Lower
       const id = await startCase({ text: t, url: u, depth, document_ids, strict, stage: lc })
       saveRecent({ id, title: (t || url.trim()).slice(0, 80), text: t || undefined, url: u, depth, at: Date.now(), document_ids, strict, stage: lc })
-      nav(`/case/${id}${isMock() ? '?mock=1' : ''}`)
+      nav(`/case/${id}${mockQ()}`)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
       setBusy(false)
@@ -244,6 +264,43 @@ export function Home() {
               Files are read in memory to brief the council; they're treated as data, never as instructions.
             </p>
           </div>
+          <div className="rounded-md border border-hair p-4 text-sm">
+            <label htmlFor="sheet" className="font-medium"><span aria-hidden>{DOC_ICON.sheet}</span> Connect a Google Sheet</label>
+            <p className="text-xs text-ink-soft">We read your numbers (sales, customers, costs…) and the council analyses your real performance.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                id="sheet" type="url" className="field min-w-0 flex-1 !py-1.5" placeholder="https://docs.google.com/spreadsheets/d/…"
+                value={sheetUrl} onChange={(e) => { setSheetUrl(e.target.value); setSheetErr('') }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSheet() } }}
+              />
+              <button type="button" className="btn btn-line !px-3 !py-1" onClick={() => addSheet()} disabled={sheetBusy || !sheetUrl.trim()}>
+                {sheetBusy ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
+            {isMock() && (
+              <button type="button" className="mt-1 text-xs underline underline-offset-2 text-ink-soft hover:text-ink" onClick={() => addSheet(true)}>
+                Use a sample sheet
+              </button>
+            )}
+            {sheets.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-2" aria-label="Connected sheets">
+                {sheets.map((d) => (
+                  <li key={d.id} className="chip flex max-w-full items-center gap-1.5 !px-2 !py-0.5 text-sm">
+                    <span aria-hidden>{DOC_ICON[d.kind] ?? DOC_ICON.sheet}</span>
+                    <span className="truncate">{d.name}</span>
+                    <span className="shrink-0 text-ink-soft">{docLabel(d)}</span>
+                    <button type="button" className="shrink-0 px-1 text-ink-soft hover:text-ink" aria-label={`Remove ${d.name}`}
+                      onClick={() => setSheets(sheets.filter((x) => x.id !== d.id))}>✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {sheetErr && <p role="alert" className="fam-stop mt-2">{sheetErr}</p>}
+            <details className="mt-2 text-xs text-ink-soft" open={!!sheetErr}>
+              <summary className="cursor-pointer">How to share your sheet</summary>
+              <p className="mt-1">In Google Sheets: <b>Share</b> → General access → <b>Anyone with the link</b> → <b>Viewer</b>. Then copy the link and paste it here. We only read it.</p>
+            </details>
+          </div>
           <label className="flex items-start gap-2 text-sm text-ink-soft">
             <input type="checkbox" className="mt-1 accent-[var(--seal)]" checked={strict} onChange={(e) => setStrict(e.target.checked)} />
             <span>Strict Soul Binder — sends back any case with weak or single-source evidence (slower, more rigorous)</span>
@@ -266,7 +323,7 @@ export function Home() {
               {busy ? 'Opening…' : 'Summon the council'}
             </button>
           </div>
-          {!ok && t.length > 0 && t.length < (files.length ? 2 : 5) && <p className="text-sm text-ink-soft">A few more words, please.</p>}
+          {!ok && t.length > 0 && t.length < (attached ? 2 : 5) && <p className="text-sm text-ink-soft">A few more words, please.</p>}
           {err && <p role="alert" className="fam-stop text-sm">{err}{/^(The court|Failed to fetch)/.test(err) && ' Is the backend running on port 8000?'}</p>}
         </form>
 

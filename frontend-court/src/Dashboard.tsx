@@ -10,12 +10,12 @@ import { Term } from './Plan'
 
 // Fixed categorical order (validated palette, slots 1-5 + 7); colour follows the source type, never its rank.
 const SRC_COLORS: Record<string, string> = {
-  web: '#2a78d6', news: '#eb6834', 'Your document': '#1baf7a', reddit: '#eda100', finance: '#e87ba4', other: '#6250d6',
+  web: '#3b82f6', news: '#f59e0b', 'Your document': '#10b981', reddit: '#a855f7', finance: '#eab308', other: '#78929e',
 }
 const srcColor = (k: string) => SRC_COLORS[k] ?? SRC_COLORS.other
 
 const tip = {
-  contentStyle: { background: 'var(--sheet)', border: '1px solid var(--hair)', borderRadius: 6, fontSize: 13, color: 'var(--ink)' },
+  contentStyle: { background: 'var(--sheet)', border: '1px solid var(--hair)', borderRadius: 2, fontSize: 13, color: 'var(--ink)' },
   itemStyle: { color: 'var(--ink)' },
   labelStyle: { color: 'var(--ink-soft)' },
 }
@@ -39,7 +39,7 @@ export function Gauge({ value, label, family, pending = true }: { value?: number
         <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke={`var(--${fam})`} strokeWidth="14" strokeLinecap="round"
           pathLength={100} strokeDasharray={`${v} 100`} className="gauge-arc" />
       )}
-      <text x="100" y="84" textAnchor="middle" fontSize="34" fontWeight="600" fontFamily="Newsreader, serif" fill="var(--ink)">{value == null ? '–' : v}</text>
+      <text x="100" y="84" textAnchor="middle" fontSize="34" fontWeight="600" fontFamily="Bricolage Grotesque, sans-serif" fill="var(--ink)">{value == null ? '–' : v}</text>
       <text x="100" y="106" textAnchor="middle" fontSize="13" fontWeight="600" fill={`var(--${fam})`}>{label ?? (value != null ? '/ 100' : pending ? 'working it out…' : '')}</text>
     </svg>
   )
@@ -201,7 +201,7 @@ const Skeleton = () => (
 
 
 // ---- "Your numbers": the user's own sheet / CSV ----
-const LINE_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100']
+const LINE_COLORS = ['#14b8a6', '#a855f7', '#f59e0b', '#3b82f6']
 /** Columns where going up is bad news. */
 const UP_IS_BAD = /cost|expense|churn|return|refund|complaint|debt|loss/i
 const fmt = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })

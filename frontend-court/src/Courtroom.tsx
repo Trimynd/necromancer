@@ -22,7 +22,7 @@ function Seal({ busy, stamped }: { busy: boolean; stamped: boolean }) {
       <path d={SEAL_PATH} fill="currentColor" />
       <circle cx="50" cy="50" r="36" fill="none" stroke="rgb(255 255 255 / .35)" strokeWidth="1.5" />
       <circle cx="50" cy="50" r="31" fill="none" stroke="rgb(255 255 255 / .2)" strokeWidth="1" />
-      <text x="50" y="58" textAnchor="middle" fontFamily="Newsreader, serif" fontSize="24" fontWeight="600" fill="rgb(255 255 255 / .9)">
+      <text x="50" y="58" textAnchor="middle" fontFamily="Bricolage Grotesque, sans-serif" fontSize="24" fontWeight="600" fill="rgb(255 255 255 / .9)">
         SB
       </text>
     </svg>
