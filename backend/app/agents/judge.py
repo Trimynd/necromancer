@@ -64,8 +64,10 @@ class Judge:
     def __init__(self, gemma: GemmaClient | None = None):
         self.gemma = gemma or GemmaClient(model=settings.gemma_model_hub)
 
-    async def _ask(self, task: str, temperature: float = 0.3) -> str:
-        resp = await self.gemma.generate(system_prompt=JUDGE_PROMPT, user_message=task, temperature=temperature)
+    async def _ask(self, task: str, temperature: float = 0.3, think: bool = True) -> str:
+        resp = await self.gemma.generate(
+            system_prompt=JUDGE_PROMPT, user_message=task, temperature=temperature, think=think
+        )
         return resp["text"]
 
     async def rule(self, question: str, cases: dict[str, dict]) -> dict[str, Ruling]:
@@ -83,7 +85,7 @@ class Judge:
         return await self._ask(VERDICT_TASK.format(question=question, cases=_fmt(cases)))
 
     async def summarize(self, question: str, cases: dict[str, dict], verdict: str) -> str:
-        return await self._ask(SUMMARY_TASK.format(question=question, cases=_fmt(cases), verdict=verdict))
+        return await self._ask(SUMMARY_TASK.format(question=question, cases=_fmt(cases), verdict=verdict), think=False)
 
 
 def _fmt(cases: dict[str, dict]) -> str:

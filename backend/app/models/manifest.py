@@ -18,6 +18,6 @@ class AgentManifest(BaseModel):
     domain: str
     problem_summary: str
     agents: list[AgentConfig]
-    topology: Topology
-    hub_agent: str
+    topology: Topology = "star"
+    hub_agent: str = ""  # unused by the court flow; kept for older manifests
     shared_memory_keys: list[str] = Field(default_factory=list)

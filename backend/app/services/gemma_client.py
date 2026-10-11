@@ -16,17 +16,17 @@ class GemmaAPIError(RuntimeError):
     pass
 
 
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 4
 _RETRY_RE = re.compile(r"retry in ([\d.]+)s", re.IGNORECASE)
 
 
-def _retry_delay(exc: Exception) -> float:
+def _retry_delay(exc: Exception, attempt: int = 1) -> float:
     """Free tier is 30 req/min per model; Google's 429 says how long to wait.
     Anything else retryable (5xx) gets a short pause."""
     match = _RETRY_RE.search(str(exc))
     if match:
         return float(match.group(1)) + 1
-    return 30.0 if getattr(exc, "code", None) == 429 else 5.0
+    return 30.0 if getattr(exc, "code", None) == 429 else 5.0 * 2 ** (attempt - 1)  # 5, 10, 20s
 
 
 def _build_tool(schema: dict) -> types.Tool:
@@ -76,11 +76,14 @@ class GemmaClient:
         tools: list[dict] | None = None,
         temperature: float = 0.7,
         max_output_tokens: int = 4096,
+        think: bool = False,
     ) -> dict:
         config = types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=temperature,
             max_output_tokens=max_output_tokens,
+            # Hidden thinking ~doubles latency; only the Judge's decisions need it.
+            thinking_config=None if think else types.ThinkingConfig(thinking_level="minimal"),
         )
 
         if tools:
@@ -99,7 +102,7 @@ class GemmaClient:
                 break
             except errors.APIError as exc:
                 if (exc.code == 429 or exc.code >= 500) and attempt < MAX_ATTEMPTS:
-                    delay = _retry_delay(exc)
+                    delay = _retry_delay(exc, attempt)
                     logger.warning("%s on %s, retrying in %.0fs (attempt %d)", exc.code, self.model, delay, attempt)
                     await asyncio.sleep(delay)
                     continue
