@@ -21,6 +21,7 @@ backend/app/static/zombie/*.html
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 
 # Personal scratch tests
 test/
