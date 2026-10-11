@@ -16,7 +16,7 @@ from app.agents.role_maker import RoleMakerAgent
 from app.agents.router import Route, RouterAgent
 from app.config import settings
 from app.models.session import SessionState, SessionStatus
-from app.services import memory
+from app.services import db, memory
 from app.services.blackboard import Blackboard
 from app.services.gemma_client import GemmaClient
 from app.services.research import web_research
@@ -102,6 +102,11 @@ class Orchestrator:
             session.error = str(exc)
             await self.blackboard.emit(session.session_id, "error", str(exc))
             await self._status(session, SessionStatus.ERROR)
+
+        await db.save_session(
+            session.session_id, status=session.status, question=session.problem_statement or session.input_url,
+            verdict=session.verdict, summary=session.summary, error=session.error,
+        )
         return session
 
     async def _run(self, session: SessionState, question: str, route: Route, extra_context: dict | None = None) -> None:
