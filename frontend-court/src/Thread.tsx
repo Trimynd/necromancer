@@ -21,7 +21,7 @@ export function Thread({ items, search }: { items: ThreadItem[]; search: string 
                 {label ? (
                   <span className={`fam-${v?.family ?? 'caution'}`}>Soul Binder ruled {label}</span>
                 ) : (
-                  <span className="text-ink-soft">{t.status === 'error' ? 'interrupted' : t.status === 'done' ? 'answered' : 'in progress'}</span>
+                  <span className="text-ink-soft">{t.status === 'error' || t.status === 'interrupted' ? 'interrupted' : t.status === 'done' ? 'answered' : 'in progress'}</span>
                 )}
               </Link>
             </li>
@@ -104,8 +104,8 @@ export function FollowUpBox({ id, family }: { id: string; family?: string }) {
     setBusy(true)
     setErr('')
     try {
-      const newId = await followUp(id, { question: t, depth, strict: old?.strict })
-      saveRecent({ id: newId, title: t.slice(0, 80), text: t, depth, at: Date.now(), strict: old?.strict, parent: id, root: rootOf(id) })
+      const newId = await followUp(id, { question: t, depth, strict: old?.strict, stage: old?.stage })
+      saveRecent({ id: newId, title: t.slice(0, 80), text: t, depth, at: Date.now(), strict: old?.strict, stage: old?.stage, parent: id, root: rootOf(id) })
       nav(`/case/${newId}${isMock() ? '?mock=1' : ''}`)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))

@@ -48,6 +48,36 @@ def _csv(data: bytes) -> str:
     return f"Table with columns: {', '.join(header)}\n" + "\n".join(lines) + more
 
 
+def _number(v: str) -> float | None:
+    s = str(v).replace(",", "").replace("\u20b9", "").replace("Rs", "").replace("%", "").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def table_and_stats(text: str) -> tuple[dict, dict]:
+    """Exact numbers by code (flow.md): per numeric column first/last/min/max/change/trend."""
+    rows = list(csv.reader(io.StringIO(text)))
+    if len(rows) < 2:
+        return {"columns": rows[0] if rows else [], "rows": []}, {}
+    header, body = rows[0], rows[1 : CSV_ROWS + 1]
+    stats = {}
+    for i, col in enumerate(header):
+        vals = [_number(r[i]) for r in body if i < len(r)]
+        nums = [v for v in vals if v is not None]
+        if len(nums) < max(2, 0.6 * len(body)):
+            continue
+        first, last = nums[0], nums[-1]
+        change = round((last - first) / abs(first) * 100, 1) if first else None
+        trend = "flat" if change is None or abs(change) < 2 else ("up" if change > 0 else "down")
+        stats[col] = {"first": first, "last": last, "min": min(nums), "max": max(nums), "change_pct": change, "trend": trend}
+    # rows can be ragged (e.g. an unquoted "Rs 1,000" splits into two cells): keep it to the header's width
+    typed = [[(_number(c) if header[i] in stats and _number(c) is not None else c) for i, c in enumerate(r[: len(header)])]
+             for r in body]
+    return {"columns": header, "rows": typed}, stats
+
+
 def _docx(data: bytes) -> str:
     doc = Document(io.BytesIO(data))
     parts = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -78,8 +108,22 @@ def extract(name: str, data: bytes) -> dict:
     if not text:
         raise DocumentError(f"{name}: no readable text found (scanned PDF?)")
     text = text[:MAX_CHARS]
-    return {"id": uuid.uuid4().hex[:12], "name": name, "kind": kind, "chars": len(text), "pages": pages,
-            "preview": text[:280], "text": text}
+    doc = {"id": uuid.uuid4().hex[:12], "name": name, "kind": kind, "chars": len(text), "pages": pages,
+           "preview": text[:280], "text": text}
+    if kind == "csv":
+        doc["table"], doc["stats"] = table_and_stats(data.decode("utf-8-sig", errors="replace"))
+        doc["text"] = _stats_brief(doc["stats"]) + doc["text"]
+    return doc
+
+
+def _stats_brief(stats: dict) -> str:
+    """Code-computed facts put first, so the council quotes exact numbers instead of eyeballing a table."""
+    if not stats:
+        return ""
+    lines = [f"{c}: first {s['first']:g}, latest {s['last']:g}, min {s['min']:g}, max {s['max']:g}"
+             + (f", change {s['change_pct']:+g}% ({s['trend']})" if s["change_pct"] is not None else "")
+             for c, s in stats.items()]
+    return "COMPUTED BY CODE (exact): " + "; ".join(lines) + "\n"
 
 
 if __name__ == "__main__":
@@ -93,4 +137,8 @@ if __name__ == "__main__":
             raise AssertionError("should have failed")
         except DocumentError as exc:
             assert msg in str(exc)
+    tb, st = table_and_stats('month,revenue\nJan,"\u20b91,000"\nFeb,800\nMar,500\n')
+    assert table_and_stats("month,revenue\nJan,1,000\nFeb,800\n")[0]["rows"][0] == ["Jan", 1.0]  # ragged row: no crash
+    assert st["revenue"]["first"] == 1000 and st["revenue"]["trend"] == "down" and st["revenue"]["change_pct"] == -50
+    assert tb["rows"][0] == ["Jan", 1000.0]
     print("documents self-check ok")

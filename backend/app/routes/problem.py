@@ -12,6 +12,8 @@ from app.state import blackboard, documents, sessions
 
 router = APIRouter(tags=["problem"])
 
+Stage = Literal["launch", "grow", "rescue", "revive"]
+
 
 class ProblemRequest(BaseModel):
     problem_statement: str = Field(default="", max_length=4000)
@@ -21,6 +23,7 @@ class ProblemRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list, max_length=3)
     # Strict Soul Binder: sends back any case whose key claims rest on weak or single-source evidence.
     strict: bool = False
+    stage: Stage | None = None
 
     @model_validator(mode="after")
     def _needs_something(self):
@@ -33,6 +36,7 @@ class FollowupRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     depth: Literal["fast", "deep"] = "fast"
     strict: bool = False
+    stage: Stage | None = None  # defaults to the parent case's stage
 
 
 class ProblemResponse(BaseModel):
@@ -54,7 +58,7 @@ def _documents(ids: list[str]) -> tuple[list[dict], list[dict]]:
     missing = [d for d in ids if d not in documents]
     if missing:
         raise HTTPException(status_code=400, detail=f"Unknown document ids (re-upload them): {missing}")
-    meta = [{k: documents[d][k] for k in ("id", "name", "kind", "chars", "pages")} for d in ids]
+    meta = [{k: v for k, v in documents[d].items() if k not in ("text", "preview")} for d in ids]
     return meta, [documents[d] for d in ids]
 
 
@@ -64,7 +68,7 @@ async def problem(req: ProblemRequest) -> ProblemResponse:
     statement = req.problem_statement.strip() or ("Analyse the attached documents." if not req.url else "")
     return _start(SessionState(
         session_id=str(uuid.uuid4()), problem_statement=statement, input_url=str(req.url) if req.url else None,
-        depth=req.depth, strict=req.strict, documents=meta, document_texts=texts,
+        depth=req.depth, strict=req.strict, stage=req.stage, documents=meta, document_texts=texts,
     ))
 
 
@@ -74,7 +78,12 @@ def lookup(session_id: str) -> dict | None:
     if live is not None:
         return live.model_dump(mode="json")
     saved = history.load(session_id)
-    return saved["session"] if saved else None
+    if not saved:
+        return None
+    snap = saved["session"]
+    if snap.get("status") not in ("done", "error"):  # not live in this process -> the run died mid-way
+        snap = {**snap, "status": "interrupted"}
+    return snap
 
 
 def thread(session: dict) -> list[dict]:
@@ -105,7 +114,7 @@ async def followup(session_id: str, req: FollowupRequest) -> ProblemResponse:
     }
     return _start(SessionState(
         session_id=str(uuid.uuid4()), problem_statement=req.question, depth=req.depth, strict=req.strict,
-        parent_id=session_id, prior_context=prior,
+        stage=req.stage or parent.get("stage"), parent_id=session_id, prior_context=prior,
         documents=parent.get("documents") or [],
         document_texts=[documents[d["id"]] for d in parent.get("documents") or [] if d["id"] in documents],
     ))

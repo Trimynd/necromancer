@@ -4,18 +4,21 @@ import { Courtroom } from './Courtroom'
 import { Md, Report } from './Report'
 import { TestimonyCard, TestimonyPanel } from './Ghost'
 import {
-  cacheEvents, DOC_ICON, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, parseVerdict, patchRecent,
+  cacheEvents, DOC_ICON, docLabel, mockInterrupted, planMd, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, parseVerdict, patchRecent,
   reduce, reduceAll, rootOf, saveRecent, startCase, sumSources, threadFromRecent, verdictText,
   type CaseState, type Recorded, type ThreadItem,
 } from './lib'
-import { MOCK_TEXT, playMock } from './mock'
+import { MOCK_SHEET, MOCK_TEXT, playMock } from './mock'
 import { FollowUpBox, LiveSteps, Thread } from './Thread'
+import { PlainVerdict, PlanSection, Review } from './Plan'
 
 // recharts is the heavy part of the bundle; only fetch it once a case has something to chart.
-const Dashboard = lazy(() => import('./Dashboard').then((m) => ({ default: m.Dashboard })))
+const loadDashboard = () => import('./Dashboard')
+const Dashboard = lazy(() => loadDashboard().then((m) => ({ default: m.Dashboard })))
+const Numbers = lazy(() => loadDashboard().then((m) => ({ default: m.Numbers })))
 
 const EVENTS = [
-  'status', 'documents', 'scores', 'route', 'research', 'startup_data', 'manifest', 'pre_research', 'tool_call', 'agent_output', 'ghost_retry',
+  'status', 'documents', 'scores', 'plan', 'route', 'research', 'startup_data', 'manifest', 'pre_research', 'tool_call', 'agent_output', 'ghost_retry',
   'ghost_dropped', 'window', 'rulings', 'report_chunk', 'verdict', 'summary', 'usage', 'call_log', 'error',
 ]
 
@@ -31,7 +34,7 @@ const reducer = (s: CaseState, a: Action): CaseState => {
   if (a.event === 'patch') return { ...s, ...(a.data as Partial<CaseState>) }
   return reduce(s, a.event, a.data)
 }
-const over = (st?: string) => st === 'done' || st === 'error'
+const over = (st?: string) => st === 'done' || st === 'error' || st === 'interrupted'
 
 type Meta = { parent_id?: string | null; thread: ThreadItem[] }
 
@@ -48,7 +51,8 @@ function useCaseStream(id: string) {
     const base = { ...initialState, text: mock && !recent ? MOCK_TEXT : recent?.text, url: recent?.url }
     return cached ? reduceAll(cached.events, base) : base
   })
-  const [conn, setConn] = useState<'connecting' | 'live' | 'reconnecting' | 'closed' | 'missing'>(cached ? 'closed' : 'connecting')
+  // 'saved': the server no longer knows this case, but this browser kept a copy.
+  const [conn, setConn] = useState<'connecting' | 'live' | 'reconnecting' | 'closed' | 'missing' | 'saved'>(over(cached?.status) ? 'closed' : 'connecting')
   const [meta, setMeta] = useState<Meta>(() => ({ parent_id: recent?.parent ?? null, thread: threadFromRecent(id) }))
 
   useEffect(() => {
@@ -60,11 +64,19 @@ function useCaseStream(id: string) {
         rec.push({ event, data })
         dispatch({ event, data })
         if (event === 'status' && over(data as string)) { cacheEvents(id, data as string, rec); setConn('closed') }
-      }, { url: recent?.url })
+      }, { url: recent?.url, sheet: recent?.document_ids?.includes(MOCK_SHEET.id), interrupted: mockInterrupted() })
     }
     let es: EventSource | undefined
     let poll: ReturnType<typeof setInterval> | undefined
     let dead = false
+    // Write what's known so far to the local cache: on every status change and at most every 5 s otherwise.
+    let rec: Recorded[] = []
+    let savedAt = 0
+    const save = (status: string, force: boolean) => {
+      if (!force && Date.now() - savedAt < 5000) return
+      savedAt = Date.now()
+      cacheEvents(id, status, rec)
+    }
 
     const snapshot = async () => {
       const res = await fetch(`/api/session/${id}`)
@@ -94,12 +106,15 @@ function useCaseStream(id: string) {
     const open = (retries: number) => {
       es = new EventSource(`/api/stream/${id}`)
       // The server replays the whole session on connect, so start from a clean slate each time.
-      es.onopen = () => { dispatch({ event: 'reset', data: null }); setConn('live') }
+      es.onopen = () => { dispatch({ event: 'reset', data: null }); rec = []; setConn('live') }
       for (const name of EVENTS) {
         es.addEventListener(name, (e) => {
           let data: unknown = (e as MessageEvent).data
           try { data = JSON.parse(data as string) } catch { /* plain string */ }
           dispatch({ event: name, data })
+          rec.push({ event: name, data })
+          const st = [...rec].reverse().find((x) => x.event === 'status')?.data as string | undefined
+          save(st ?? 'pending', name === 'status')
           if (name === 'status' && over(data as string)) {
             es?.close()
             setConn('closed')
@@ -131,7 +146,7 @@ function useCaseStream(id: string) {
     const legacy = () =>
       meta.then((snap) => {
         if (dead) return
-        if (!snap) return !cached && setConn('missing')
+        if (!snap) return setConn(cached ? 'saved' : 'missing')
         if (over(snap.status)) {
           dispatch({ event: 'load', data: { ...fromSnapshot(snap), text: snap.problem_statement || recent?.text, url: snap.input_url ?? recent?.url } })
           setConn('closed')
@@ -143,10 +158,11 @@ function useCaseStream(id: string) {
         if (dead) return
         if (!r) return legacy()
         dispatch({ event: 'replay', data: r.events })
-        if (over(r.status)) { cacheEvents(id, r.status, r.events); setConn('closed') }
+        cacheEvents(id, r.status, r.events)
+        if (over(r.status)) setConn('closed')
         else open(3)
       })
-      .catch(() => !dead && !cached && open(3))
+      .catch(() => !dead && !over(cached?.status) && open(3))
 
     return () => { dead = true; es?.close(); clearInterval(poll) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -227,13 +243,17 @@ function CaseView() {
   const base = `/case/${id}`
   const nav = useNavigate()
   const { s, conn, meta } = useCaseStream(id)
+  // Fetch the charts chunk now, so it's ready by the time scores arrive.
+  useEffect(() => { loadDashboard().catch(() => {}) }, [])
   const [since] = useState(() => loadRecent().find((r) => r.id === id)?.at ?? Date.now())
   const t0 = useRef(Date.now())
   const ranLive = useRef(false)
   const [t1, setT1] = useState<number>()
   const [retrying, setRetrying] = useState(false)
   const simple = s.route?.complexity === 'simple'
-  const finished = s.status === 'done' || s.status === 'error'
+  const finished = over(s.status)
+  const interrupted = s.status === 'interrupted'
+  const sheets = (s.documents ?? []).filter((d) => d.table?.rows.length)
   // The verdict section lights up as soon as "## 1. Verdict" streams in, before the verdict event.
   const v = parseVerdict(verdictText(s))
   // From the report's "Risks & open questions" (- **Assumption:** …), once it has streamed in.
@@ -253,7 +273,10 @@ function CaseView() {
 
   const download = () => {
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([s.report], { type: 'text/markdown' }))
+    a.href = URL.createObjectURL(new Blob([s.plan ? `${s.report}
+
+${planMd(s.plan)}
+` : s.report], { type: 'text/markdown' }))
     a.download = `necromancer-${(s.text || 'case').slice(0, 40).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`
     a.click()
     setTimeout(() => URL.revokeObjectURL(a.href), 1000)
@@ -268,11 +291,11 @@ function CaseView() {
       const old = loadRecent().find((r) => r.id === id)
       const depth = old?.depth ?? 'fast'
       const newId = meta.parent_id && s.text
-        ? await followUp(meta.parent_id, { question: s.text, depth, strict: old?.strict })
-        : await startCase({ text: s.text, url: s.url, depth, document_ids: old?.document_ids, strict: old?.strict })
+        ? await followUp(meta.parent_id, { question: s.text, depth, strict: old?.strict, stage: old?.stage })
+        : await startCase({ text: s.text, url: s.url, depth, document_ids: old?.document_ids, strict: old?.strict, stage: old?.stage })
       saveRecent({
         id: newId, title: (s.text || s.url || 'Case').slice(0, 80), text: s.text, url: s.url, depth, at: Date.now(), document_ids: old?.document_ids,
-        strict: old?.strict, parent: meta.parent_id ?? undefined, root: meta.parent_id ? rootOf(meta.parent_id) : undefined,
+        strict: old?.strict, stage: old?.stage, parent: meta.parent_id ?? undefined, root: meta.parent_id ? rootOf(meta.parent_id) : undefined,
       })
       nav(`/case/${newId}${isMock() ? '?mock=1' : ''}`)
     } catch { setRetrying(false) }
@@ -294,6 +317,19 @@ function CaseView() {
     <div>
       {conn === 'reconnecting' && (
         <p role="status" className="no-print mb-3 rounded-md border border-hair px-3 py-2 text-sm text-ink-soft">Lost connection. Reconnecting…</p>
+      )}
+      {conn === 'saved' && (
+        <p role="status" className="no-print mb-3 rounded-md border border-hair px-3 py-2 text-sm text-ink-soft">
+          Showing the saved copy from this browser. The server no longer has this case.
+        </p>
+      )}
+      {interrupted && (
+        <section role="alert" className="no-print mb-4 rounded-md border border-seal/50 bg-sheet px-4 py-3">
+          <p className="font-serif text-lg">This run was interrupted (the server restarted). Everything up to that point is below.</p>
+          {(s.text || s.url) && (
+            <button className="btn btn-seal mt-2 text-sm" onClick={tryAgain} disabled={retrying}>{retrying ? 'Opening…' : 'Run it again'}</button>
+          )}
+        </section>
       )}
       <Thread items={meta.thread} search={search} />
       {showStage && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />}
@@ -326,7 +362,7 @@ function CaseView() {
                   <li key={d.id} className="chip chip-doc flex max-w-full items-center gap-1.5 !px-2.5 !py-1 text-sm" title={d.preview}>
                     <span aria-hidden>{DOC_ICON[d.kind] ?? '📄'}</span>
                     <span className="truncate">{d.name}</span>
-                    <span className="shrink-0 opacity-75">{d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''}</span>
+                    <span className="shrink-0 opacity-75">{docLabel(d)}</span>
                   </li>
                 ))}
               </ul>
@@ -378,6 +414,21 @@ function CaseView() {
             </section>
           )}
 
+          {!simple && (v || s.scores || s.status === 'summarizing') && <PlainVerdict s={s} v={v} assumption={assumption} />}
+          {sheets.length > 0 && (
+            <Suspense fallback={<div className="entry space-y-2" aria-label="Loading your numbers"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
+              {sheets.map((d) => <Numbers key={d.id} doc={d} />)}
+            </Suspense>
+          )}
+          {!simple && <PlanSection plan={s.plan} pending={s.status === 'summarizing'} title={s.text} />}
+          {!simple && <Review plan={s.plan} />}
+
+          {!simple && s.ghosts.length > 0 && (s.status === 'summarizing' || s.verdict || s.scores || s.plan || finished) && (
+            <Suspense fallback={<div className="entry space-y-2" aria-label="Loading charts"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
+              <Dashboard s={s} seconds={seconds} />
+            </Suspense>
+          )}
+
           {s.ghosts.length > 0 && (
             <>
               <section id="council" className="entry">
@@ -398,32 +449,6 @@ function CaseView() {
                 </div>
               </section>
             </>
-          )}
-
-          {!simple && v && (
-            <section id="verdict" className="entry">
-              <div className="bar-seal flex items-start gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm text-ink-soft">The Soul Binder's verdict</p>
-                  {v.label && (
-                    <p className={`font-serif text-[32px] font-semibold leading-tight sm:text-[44px] fam-${v.family ?? 'caution'}`}>{v.label}</p>
-                  )}
-                  {v.confidence != null && <p className="text-sm text-ink-soft">Confidence {v.confidence}%</p>}
-                </div>
-              </div>
-              {assumption && (
-                <div className="mt-4 rounded-md border border-caution/50 bg-caution/10 px-4 py-3">
-                  <p className="text-xs font-medium uppercase tracking-wide fam-caution">The most dangerous assumption</p>
-                  <div className="md mt-1 text-[15px]"><Md>{assumption}</Md></div>
-                </div>
-              )}
-            </section>
-          )}
-
-          {!simple && s.ghosts.length > 0 && (s.status === 'summarizing' || s.verdict || s.scores || finished) && (
-            <Suspense fallback={<div className="entry space-y-2" aria-label="Loading charts"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
-              <Dashboard s={s} seconds={seconds} />
-            </Suspense>
           )}
 
           {!simple && (s.report || s.status === 'summarizing') && (

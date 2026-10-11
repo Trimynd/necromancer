@@ -73,11 +73,53 @@ SCORE_TASK = """QUESTION: {question}
 CASES (with your rulings):
 {cases}
 
-Score the situation from the evidence only. Respond with STRICT JSON only:
-{{"label": "the verdict label you would give, e.g. GO / PIVOT / NO-GO",
+THE OWNER'S SITUATION: {stage}
+
+Score the situation from the evidence only, and explain it to a small-business owner in India
+who is NOT an analyst: short sentences, everyday words, Rs amounts where useful, no jargon
+(never say "unit economics", "TAM", "pivot" etc. without saying what it means).
+Respond with STRICT JSON only:
+{{"label": "the verdict label, e.g. GO / PIVOT / NO-GO (or for a running business STRONG / EXPOSED / AT RISK,
+            for a struggling one RECOVERABLE / RESTRUCTURE / WIND DOWN, for a dead one REVIVE / REVIVE WITH PIVOT / STAY DEAD)",
   "dimensions": {{"Market demand": 0-10, "Competition": 0-10, "Unit economics": 0-10,
-                  "Regulation & risk": 0-10, "Execution": 0-10}}}}
+                  "Regulation & risk": 0-10, "Execution": 0-10}},
+  "plain": {{"verdict_in_plain_words": "1-2 sentences: the answer, as you'd say it to a friend",
+             "what_this_means": "2-4 sentences: what the owner should do now, concretely",
+             "confidence_in_plain_words": "1 sentence: how sure the council is and why",
+             "dimension_notes": {{"Market demand": "one plain sentence", "Competition": "...", "Unit economics": "...",
+                                  "Regulation & risk": "...", "Execution": "..."}}}}}}
 Higher is always better for the business (e.g. low competition = high score)."""
+
+PLAN_TASK = """QUESTION: {question}
+
+THE OWNER'S SITUATION: {stage}
+
+CASES (with your rulings):
+{cases}
+
+Turn the council's findings into a practical 90-day plan (13 weeks) for this owner. Plain words,
+concrete actions with numbers (customers, Rs, dates), each task doable by a small team. Start with
+the cheapest test of the riskiest assumption. Fit the situation: a new idea = test, then build, then launch;
+a running business = protect, then grow; a struggling one = stop the bleeding, fix the cause, stabilise;
+a dead one = learn why it died, re-test demand, relaunch small.
+Respond with STRICT JSON only:
+{{"horizon_days": 90, "goal": "one sentence: where they should be on day 90",
+  "first_step_this_week": "the single most important thing to do in the next 7 days",
+  "phases": [{{"name": "short phase name", "start_week": 1, "end_week": 4}}],
+  "tasks": [{{"id": "t1", "title": "action, max 10 words", "phase": "a phase name above", "start_week": 1,
+              "end_week": 2, "owner": "who does it (Founder / Ops / Marketing ...)", "why": "one plain sentence",
+              "success_metric": "how they'll know it worked", "depends_on": []}}],
+  "review": {{"strengths": ["2-4 things working for them"], "risks": ["2-4 things that could hurt them"],
+              "stop_doing": ["1-3 things to stop"]}}}}
+3 phases, 6-10 tasks, weeks between 1 and 13, end_week >= start_week.
+No abbreviations or business jargon (write "cost of one meal", not COGS; "first simple version of the app", not MVP)."""
+
+STAGE_HINTS = {
+    "launch": "a new idea that is not built yet",
+    "grow": "a running business that wants to grow",
+    "rescue": "a running business that is declining",
+    "revive": "a company that already shut down",
+}
 
 
 class Ruling(BaseModel):
@@ -120,14 +162,21 @@ class SoulBinder:
             return await self._ask(task, temperature, think=False)
         return resp["text"]
 
-    async def score(self, question: str, cases: dict[str, dict]) -> dict:
-        """Per-dimension ratings from the model; the 0-100 overall is computed in code (flow.md rule)."""
-        raw = extract_json(await self._ask(SCORE_TASK.format(question=question, cases=_fmt(cases)),
-                                           temperature=0.1, think=False))
+    async def score(self, question: str, cases: dict[str, dict], stage: str | None = None) -> dict:
+        """Per-dimension ratings + plain-language explanation; the 0-100 overall is computed in code (flow.md)."""
+        raw = extract_json(await self._ask(
+            SCORE_TASK.format(question=question, cases=_fmt(cases), stage=_stage(stage)), temperature=0.1, think=False))
         dims = {str(k): max(0.0, min(10.0, float(v))) for k, v in (raw.get("dimensions") or {}).items()
                 if isinstance(v, (int, float))}
         overall = round(sum(dims.values()) / len(dims) * 10) if dims else None
-        return {"label": str(raw.get("label", "")), "dimensions": dims, "overall": overall}
+        plain = raw.get("plain") if isinstance(raw.get("plain"), dict) else {}
+        return {"label": str(raw.get("label", "")), "dimensions": dims, "overall": overall, "plain": plain}
+
+    async def plan(self, question: str, cases: dict[str, dict], stage: str | None = None) -> dict:
+        """A 90-day action plan (Gantt-ready). Week numbers are clamped in code so the chart never breaks."""
+        raw = extract_json(await self._ask(
+            PLAN_TASK.format(question=question, cases=_fmt(cases), stage=_stage(stage)), temperature=0.3, think=False))
+        return _clean_plan(raw)
 
     async def rule(
         self, question: str, cases: dict[str, dict], window: list[dict] | None = None, think: bool = True,
@@ -157,6 +206,38 @@ class SoulBinder:
         return self.gemma.stream(
             system_prompt=SOUL_BINDER_PROMPT, user_message=REPORT_TASK.format(question=question, cases=_fmt(cases)),
         )
+
+
+def _stage(stage: str | None) -> str:
+    return STAGE_HINTS.get(stage or "", "not stated; infer it from the question")
+
+
+def _week(v, default: int) -> int:
+    try:
+        return max(1, min(13, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_plan(raw: dict) -> dict:
+    tasks = []
+    for i, t in enumerate(raw.get("tasks") or []):
+        if not isinstance(t, dict) or not t.get("title"):
+            continue
+        start = _week(t.get("start_week"), 1)
+        tasks.append({**t, "id": str(t.get("id") or f"t{i + 1}"), "start_week": start,
+                      "end_week": max(start, _week(t.get("end_week"), start)),
+                      "depends_on": [str(d) for d in t.get("depends_on") or []]})
+    phases = []
+    for p in raw.get("phases") or []:
+        if isinstance(p, dict) and p.get("name"):
+            start = _week(p.get("start_week"), 1)
+            phases.append({"name": str(p["name"]), "start_week": start, "end_week": max(start, _week(p.get("end_week"), 13))})
+    review = raw.get("review") if isinstance(raw.get("review"), dict) else {}
+    return {"horizon_days": 90, "goal": str(raw.get("goal", "")),
+            "first_step_this_week": str(raw.get("first_step_this_week", "")),
+            "phases": phases, "tasks": tasks,
+            "review": {k: [str(x) for x in review.get(k) or []] for k in ("strengths", "risks", "stop_doing")}}
 
 
 def _fmt(cases: dict[str, dict]) -> str:

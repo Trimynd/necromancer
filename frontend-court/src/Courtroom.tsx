@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DOC_ICON, initials, parseVerdict, roundOf, sumSources, verdictText, type CaseState, type Ghost } from './lib'
+import { explainLabel } from './Plan'
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -185,7 +186,7 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
 
   const found = sumSources(s.research)
   const caption = (() => {
-    if (s.status === 'error') return 'The court was interrupted.'
+    if (s.status === 'error' || s.status === 'interrupted') return 'The court was interrupted.'
     if (v) return 'The Soul Binder has ruled.'
     if (writing) return 'The Soul Binder is writing the verdict…'
     if (deliberating) return 'The Soul Binder is weighing the cases…'
@@ -204,13 +205,13 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
   })()
 
   return (
-    <section className="stage sheet mb-6" ref={stage} aria-label="The courtroom">
+    <section className={`stage sheet mb-6 ${s.status === 'done' ? 'compact' : ''}`} ref={stage} aria-label="The courtroom">
       <p className="stage-caption font-serif text-[18px] text-ink-soft" aria-live="polite">{caption}</p>
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
         {beams.map((b, i) => <line key={i} className="beam" {...b} />)}
       </svg>
       <div className="seal-wrap" ref={seal}>
-        <Seal busy={(deliberating || writing || (!s.ghosts.length && s.status !== 'error' && s.status !== 'done'))} stamped={!!v} />
+        <Seal busy={(deliberating || writing || (!s.ghosts.length && s.status !== 'error' && s.status !== 'done' && s.status !== 'interrupted'))} stamped={!!v} />
         <div className="mt-1 text-sm font-medium" style={{ color: 'var(--seal)' }}>Soul Binder</div>
         {!!s.documents?.length && (
           <div className="bench-docs" aria-label={`${s.documents.length} documents in evidence`}>
@@ -220,7 +221,8 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
         {v?.label && (
           <div className={`appear font-serif text-[22px] font-semibold leading-tight sm:text-[28px] fam-${v.family ?? 'caution'} max-w-[260px] text-center`}>
             {v.label}
-            {v.confidence != null && <span className="ml-2 font-sans text-sm text-ink-soft">{v.confidence}%</span>}
+            {explainLabel(v.label) && <span className="block font-sans text-sm font-normal text-ink">{explainLabel(v.label)}</span>}
+            {v.confidence != null && <span className="block font-sans text-xs font-normal text-ink-soft">{v.confidence}% sure</span>}
           </div>
         )}
       </div>

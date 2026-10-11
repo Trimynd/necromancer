@@ -37,7 +37,9 @@ class Blackboard:
             queue.put_nowait(payload)
 
     def history(self, session_id: str) -> list[dict]:
-        return [{"event": e.event, "data": e.data} for e in self._history.get(session_id, [])]
+        events = self._history.get(session_id, [])
+        t0 = events[0].timestamp if events else None
+        return [{"event": e.event, "data": e.data, "t": round((e.timestamp - t0).total_seconds(), 1)} for e in events]
 
     def subscribe(self, session_id: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue()

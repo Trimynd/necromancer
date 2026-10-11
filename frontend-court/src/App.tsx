@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { DOC_ICON, familyOf, isMock, kindOf, loadRecent, saveRecent, startCase, uploadDocuments, type Recent } from './lib'
+import { DOC_ICON, familyOf, isMock, kindOf, loadRecent, saveRecent, startCase, uploadDocuments, type Recent, type Stage as Lower } from './lib'
 import { MOCK_TEXT } from './mock'
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -121,8 +121,9 @@ export function Home() {
       const docs = files.length ? await uploadDocuments(files) : []
       const document_ids = docs.map((d) => d.id)
       const u = urlOk ? url.trim() : undefined
-      const id = await startCase({ text: t, url: u, depth, document_ids, strict })
-      saveRecent({ id, title: (t || url.trim()).slice(0, 80), text: t || undefined, url: u, depth, at: Date.now(), document_ids, strict })
+      const lc = stage.toLowerCase() as Lower
+      const id = await startCase({ text: t, url: u, depth, document_ids, strict, stage: lc })
+      saveRecent({ id, title: (t || url.trim()).slice(0, 80), text: t || undefined, url: u, depth, at: Date.now(), document_ids, strict, stage: lc })
       nav(`/case/${id}${isMock() ? '?mock=1' : ''}`)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))

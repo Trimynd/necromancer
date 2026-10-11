@@ -27,3 +27,23 @@ def test_followup_memory_scope_covers_earlier_turns():
         assert not memory._matches({"session_id": "zzz"}, memory.session_scope())
     finally:
         memory.evidence_tag.reset(token)
+
+
+def test_plan_weeks_are_clamped_for_the_gantt():
+    from app.agents.soul_binder import _clean_plan
+    p = _clean_plan({"tasks": [{"title": "a", "start_week": 0, "end_week": 40}, {"title": "b", "start_week": "x"},
+                               {"no_title": True}], "phases": [{"name": "Test", "start_week": 5, "end_week": 2}]})
+    assert [(t["start_week"], t["end_week"]) for t in p["tasks"]] == [(1, 13), (1, 1)]
+    assert p["phases"][0] == {"name": "Test", "start_week": 5, "end_week": 5}
+    assert set(p["review"]) == {"strengths", "risks", "stop_doing"}
+
+
+def test_run_saved_mid_way_reopens_as_interrupted():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    history.save("dead-run-1", {"status": "in_court", "problem_statement": "q", "parent_id": None},
+                 [{"event": "status", "data": "routing", "t": 0.0}])
+    c = TestClient(app)
+    assert c.get("/api/session/dead-run-1").json()["status"] == "interrupted"
+    assert c.get("/api/session/dead-run-1/events").json()["status"] == "interrupted"
+    assert 'data: "interrupted"' in c.get("/api/stream/dead-run-1").text

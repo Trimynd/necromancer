@@ -2,7 +2,7 @@
 
 export type Status =
   | 'pending' | 'routing' | 'scraping' | 'researching' | 'role_making'
-  | 'in_court' | 'summarizing' | 'done' | 'error'
+  | 'in_court' | 'summarizing' | 'done' | 'error' | 'interrupted'
 
 export interface Route { topic: string; complexity: 'simple' | 'complex'; needs_web: boolean; search_queries: string[] }
 export interface ResearchRow { query: string; chunks_stored: number; per_source?: Record<string, number> }
@@ -37,8 +37,45 @@ export interface Ghost {
   roundSearches?: string[][]
   persona?: string
 }
-export interface Doc { id: string; name: string; kind: string; chars?: number; pages?: number | null; preview?: string }
-export interface Scores { overall: number; label?: string; dimensions?: Record<string, number> }
+export interface ColStat { first: number; last: number; min: number; max: number; change_pct: number | null; trend: 'up' | 'down' | 'flat' }
+export interface Table { columns: string[]; rows: (string | number)[][] }
+export interface Doc {
+  id: string; name: string; kind: string; chars?: number; pages?: number | null; preview?: string
+  /** csv / sheet only: the parsed table (≤ 200 rows, header excluded) and per-numeric-column stats. */
+  table?: Table; stats?: Record<string, ColStat>
+}
+/** Same shape the backend sends: stats for every column whose cells are all numbers. */
+export function statsOf(t: Table): Record<string, ColStat> {
+  const out: Record<string, ColStat> = {}
+  t.columns.forEach((c, i) => {
+    const raw = t.rows.map((r) => r[i]).filter((v) => v !== '' && v != null)
+    const xs = raw.map((v) => (typeof v === 'number' ? v : Number(String(v).replace(/[,₹$%\s]/g, ''))))
+    if (!xs.length || xs.some((x) => !Number.isFinite(x))) return
+    const first = xs[0], last = xs[xs.length - 1]
+    const change_pct = first ? Math.round(((last - first) / Math.abs(first)) * 1000) / 10 : null
+    out[c] = { first, last, min: Math.min(...xs), max: Math.max(...xs), change_pct,
+      trend: change_pct == null || Math.abs(change_pct) < 1 ? 'flat' : change_pct > 0 ? 'up' : 'down' }
+  })
+  return out
+}
+export interface Plain {
+  verdict_in_plain_words?: string
+  what_this_means?: string
+  confidence_in_plain_words?: string
+  dimension_notes?: Record<string, string>
+}
+export interface Scores { overall?: number; label?: string; dimensions?: Record<string, number>; plain?: Plain }
+export interface PlanTask {
+  id?: string; title?: string; phase?: string; start_week?: number; end_week?: number
+  owner?: string; why?: string; success_metric?: string; depends_on?: string[]
+}
+export interface Plan {
+  horizon_days?: number; goal?: string; first_step_this_week?: string
+  phases?: { name?: string; start_week?: number; end_week?: number }[]
+  tasks?: PlanTask[]
+  review?: { strengths?: string[]; risks?: string[]; stop_doing?: string[] }
+}
+export type Stage = 'launch' | 'grow' | 'rescue' | 'revive'
 export interface Usage { [model: string]: { calls?: number; input?: number; output?: number; thinking?: number } }
 
 export interface CaseState {
@@ -58,6 +95,7 @@ export interface CaseState {
   calls?: number
   documents?: Doc[]
   scores?: Scores
+  plan?: Plan
   error?: string
 }
 
@@ -111,7 +149,7 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
       const next = { ...s, status: d as Status }
       if (d === 'in_court') next.ghosts = s.ghosts.map((g) => (g.phase === 'spawned' ? { ...g, phase: 'researching' } : g))
       // Fast mode never redoes: a sent-back ghost just stays sent back.
-      if (d === 'summarizing' || d === 'done')
+      if (d === 'summarizing' || d === 'done' || d === 'interrupted')
         next.ghosts = next.ghosts.map((g) => (g.phase === 'redoing' ? { ...g, phase: 'sent_back' } : g))
       return next
     }
@@ -177,7 +215,9 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
     case 'documents':
       return { ...s, documents: d?.items ?? d }
     case 'scores':
-      return { ...s, scores: d }
+      return d && typeof d === 'object' ? { ...s, scores: d } : s
+    case 'plan':
+      return d && typeof d === 'object' ? { ...s, plan: d } : s
     case 'report_chunk':
       return { ...s, report: s.report + String(d) }
     case 'summary':
@@ -226,6 +266,7 @@ export function fromSnapshot(snap: any): CaseState {
     report: snap.summary ?? '',
     documents: snap.documents ?? undefined,
     scores: snap.scores ?? undefined,
+    plan: snap.plan ?? undefined,
     verdict: snap.verdict ?? undefined,
     usage: snap.usage ?? undefined,
     error: snap.error ?? undefined,
@@ -269,7 +310,7 @@ export const sumSources = (rows?: { per_source?: Record<string, number>; chunks_
 
 // ---- recent cases (localStorage) ----
 export interface Recent {
-  id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean
+  id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean; stage?: Stage
   /** Follow-ups: the case this one continues, and the first case of the thread. */
   parent?: string; root?: string
 }
@@ -287,8 +328,12 @@ export function patchRecent(id: string, patch: Partial<Recent>) {
   if (found) saveRecent({ ...found, ...patch })
 }
 
-export const isMock = () =>
-  import.meta.env.VITE_USE_MOCK === 'true' || new URLSearchParams(location.search).get('mock') === '1'
+const mockParam = () => new URLSearchParams(location.search).get('mock')
+export const isMock = () => import.meta.env.VITE_USE_MOCK === 'true' || mockParam() === '1' || mockParam() === 'interrupted'
+/** ?mock=interrupted plays a run that stops mid-court, as after a server restart. */
+export const mockInterrupted = () => mockParam() === 'interrupted'
+/** Query string that keeps the current mock variant across navigation. */
+export const mockQ = () => (isMock() ? `?mock=${mockParam() ?? '1'}` : '')
 
 /** POST /api/documents (multipart, field "files"). Throws with the server's `detail` on 400. */
 export async function uploadDocuments(files: File[]): Promise<Doc[]> {
@@ -304,19 +349,34 @@ export async function uploadDocuments(files: File[]): Promise<Doc[]> {
   return (await res.json()).documents ?? []
 }
 
+/** POST /api/connectors/google-sheet -> the sheet as a document. Throws with the server's `detail` on 400. */
+export async function connectSheet(url: string): Promise<Doc[]> {
+  const res = await fetch('/api/connectors/google-sheet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
+  if (!res.ok) {
+    let detail: unknown = `Couldn't connect the sheet (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  return (await res.json()).documents ?? []
+}
+
 export const kindOf = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : 'text'
 }
-export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx: '📘', text: '📄' }
+export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', docx: '📘', text: '📄' }
+export const docLabel = (d: Doc) =>
+  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
+    : d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''
 
-export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean }): Promise<string> {
+export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean; stage?: Stage }): Promise<string> {
   if (isMock()) return 'mock-' + Date.now().toString(36)
   const res = await fetch('/api/problem', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       problem_statement: body.text ?? '', url: body.url || null, depth: body.depth, document_ids: body.document_ids ?? [], strict: !!body.strict,
+      stage: body.stage ?? null,
     }),
   })
   if (!res.ok) throw new Error(`The court couldn't open the case (${res.status}).`)
@@ -324,12 +384,12 @@ export async function startCase(body: { text?: string; url?: string; depth: stri
 }
 
 /** POST /api/session/:id/followup -> the new (child) session id. */
-export async function followUp(id: string, body: { question: string; depth: string; strict?: boolean }): Promise<string> {
+export async function followUp(id: string, body: { question: string; depth: string; strict?: boolean; stage?: Stage }): Promise<string> {
   if (isMock() || id.startsWith('mock-')) return 'mock-' + Date.now().toString(36)
   const res = await fetch(`/api/session/${id}/followup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question: body.question, depth: body.depth, strict: !!body.strict }),
+    body: JSON.stringify({ question: body.question, depth: body.depth, strict: !!body.strict, stage: body.stage ?? null }),
   })
   if (!res.ok) throw new Error(`The court couldn't take the follow-up (${res.status}).`)
   return (await res.json()).session_id
@@ -401,3 +461,26 @@ const HIGHLIGHT = new RegExp(
 )
 /** Splits text into [plain, match, plain, match, …]; odd indexes are numbers, money, % or dates. */
 export const splitHighlights = (t: string) => t.split(HIGHLIGHT)
+
+// ---- 90-day plan exports ----
+const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+export function planCsv(p: Plan) {
+  const rows = [['Task', 'Phase', 'Start week', 'End week', 'Owner', 'Success looks like', 'Why', 'Needs first']]
+  for (const t of p.tasks ?? [])
+    rows.push([t.title, t.phase, t.start_week, t.end_week, t.owner, t.success_metric, t.why, (t.depends_on ?? []).join(' ')].map((x) => String(x ?? '')))
+  return rows.map((r) => r.map(csvCell).join(',')).join('\r\n')
+}
+export function planMd(p: Plan) {
+  const out = [`## Your ${p.horizon_days ?? 90}-day plan`]
+  if (p.goal) out.push(`**Goal:** ${p.goal}`)
+  if (p.first_step_this_week) out.push(`**Do this first (this week):** ${p.first_step_this_week}`)
+  if (p.tasks?.length) {
+    const cell = (x?: string) => (x ?? '').replace(/\|/g, '/')
+    out.push(['| Task | Weeks | Owner | Success looks like |', '|---|---|---|---|',
+      ...p.tasks.map((t) => `| ${cell(t.title)} | W${t.start_week ?? '?'}–W${t.end_week ?? t.start_week ?? '?'} | ${cell(t.owner)} | ${cell(t.success_metric)} |`)].join('\n'))
+  }
+  const r = p.review
+  const list = (h: string, xs?: string[]) => xs?.length && out.push(`### ${h}`, xs.map((x) => `- ${x}`).join('\n'))
+  if (r) { list("What's working for you", r.strengths); list('What could hurt you', r.risks); list('Stop doing', r.stop_doing) }
+  return out.join('\n\n')
+}
