@@ -130,6 +130,25 @@ Every agent follows the same **thinking checklist** in its JSON output: core ass
 
 > 🔄 *Delivery Logistics Expert: found 6 rivals…* · *Student Pricing Analyst: reading 4 reports…* · *FSSAI Compliance Checker: checking licences…*
 
+#### 🔌 Data connectors: real financial and market data, not just web search
+Agents call real data sources as **tools**, and every number keeps its source. The report says *"Source: Google Places"* or *"Source: SEC filing"* instead of *"AI estimate"*.
+
+| Connector | Gives the agents | Example tool call | Access | Build now? |
+|---|---|---|---|---|
+| 📍 **Google Places API** | Nearby competitors: rating, review count, price level, location | `places_nearby("mobile phone store", "Viman Nagar, Pune")` | Paid, monthly free credit | 🟥 Yes: Rescue & Grow need it |
+| 📈 **Stock / financials API** (Alpha Vantage or Financial Modeling Prep) | Listed competitors' revenue, profit, margins, ratios | `company_financials("TRENT.BSE")` | Free tier with key | 🟥 Yes |
+| 🇮🇳 **data.gov.in** | Official Indian market & MSME statistics by sector and state | `gov_data("retail MSME Maharashtra")` | Free key | 🟥 Yes |
+| 🇺🇸 **SEC EDGAR** | Full financials of US-listed companies | `sec_financials("AAPL")` | Free, official | 🟨 If time |
+| 📰 **News API** (GNews / NewsAPI) | Competitor launches, funding, regulation news | `news("Simpl RBI")` | Free tier | 🟨 If time |
+| 🏛️ **MCA / Tofler / Crunchbase** | Private Indian companies' filings, funding rounds | n/a | Paid | 🟦 Roadmap |
+
+**How it works:**
+- The Role Maker gives each agent the connectors its role needs (Competition Scout → Places + financials; Market Analyst → data.gov.in).
+- Connector results go into the evidence, labelled with source **type**: `connector` (official data) · `web` (search result) · `estimate` (AI, no source).
+- Synthesis prefers connector data over web data over estimates when they disagree.
+
+> ⚠️ **Honest limit:** private Indian companies' financials aren't freely available (MCA filings sit behind paid aggregators). For private competitors the agents fall back to web search and mark the figure **"estimate"**. Say this openly if a judge asks.
+
 ### 5️⃣ Devil's Advocate 😈
 One Gemma call reads all the findings and **tries to kill the business case**. The attack depends on the mode:
 
@@ -262,6 +281,7 @@ sequenceDiagram
 | **Parallel agents** | ~6–8 API calls per run | 3 keys from different accounts + key rotation + demo key kept untouched |
 | **AI-estimated market & finance numbers** | Can be wrong; judges push hardest on ROI | Show assumptions + sources, ranges not single numbers, sliders let the user correct them |
 | **All 4 modes first-class** | 4 playbooks, 4 attacks, 4 signature sections, 4 samples: the biggest scope risk | Shared pipeline keeps it to prompt variants + 4 components; cut order in [modes.md](modes.md#️-if-we-fall-behind-cut-in-this-order) |
+| **Data connectors** | API keys to set up, free-tier limits, a connector down on stage | Keys tested in the first 30 min · cache every connector response per run · saved runs include connector data · agent falls back to web search if a connector fails |
 | **Document upload** | Misread numbers, private data, hidden instructions in a file | User confirms the "What I learned" card · CSV read by code · never stored · document text treated as data |
 | **Big report (12 sections)** | Too much for 6h × 3 people | Strict priorities. If behind, cut first: competitor scatter → market growth chart → risk matrix |
 | **Live demo** | Wi-Fi or API fails during judging | **Saved run for every mode**, replayed with the same animations |
@@ -273,6 +293,8 @@ sequenceDiagram
 - [ ] **Web search model:** does Gemma search work through the API? (run `backend/check_search.py`). If not, use Gemini for research and Gemma for everything else.
 - [ ] **Scope:** any startup (better demo) or fintech only (sharper compliance angle)?
 - [ ] **PDF input:** does Gemma accept PDFs through the API? If not, `pypdf` text extraction or Gemini for this one step.
+- [x] **Data connectors** (judge's feedback): Google Places + stock/financials API + data.gov.in now; SEC EDGAR + news if time; MCA/Crunchbase on the roadmap
+- [ ] **Connector API keys:** who creates the Google Places, Alpha Vantage/FMP and data.gov.in keys before the build starts?
 - [x] **All 4 modes first-class**, each with a demo sample + saved run
 - [x] **4 mode cards + AI preselect**
 - [x] **Document upload** (PDF + CSV/Excel must; images should; DOCX/PPTX stretch)

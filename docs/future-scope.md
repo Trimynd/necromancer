@@ -116,7 +116,16 @@ Anonymous, aggregated comparisons from everyone using the product:
 A dedicated agent matches the business to schemes, subsidies and loans it qualifies for (MUDRA, Startup India, state MSME schemes…), with eligibility, documents needed and an application link.
 
 ### 🔌 Data connections
-Instead of uploads: connect UPI / payment gateway, POS, Tally, GST returns, or Google Business Profile, with the owner's consent. Numbers update themselves.
+
+**Your own business data** (with the owner's consent, read-only): instead of uploads, connect Google Sheets, Razorpay / payment gateway, POS, Tally, Zoho Books, GST returns, or bank statements through the **Account Aggregator** framework. Numbers update themselves, and the health score follows.
+
+**External financial & market data** (beyond the hackathon's Google Places + stock API + data.gov.in):
+| Connector | Adds |
+|---|---|
+| 🏛️ **MCA filings via Tofler** | Financials of *private* Indian competitors |
+| 💼 **Crunchbase / Tracxn** | Funding rounds, investors, startup competitors |
+| 📰 **News monitoring** | Live alerts on competitor launches, funding and regulation |
+| 🔎 **Search trends** | Is demand for the category rising or falling? |
 
 ---
 

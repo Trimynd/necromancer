@@ -362,6 +362,13 @@ Cost and time from this list are added to **Investment → one-time costs** and 
 
 Every link the agents used, **grouped by agent**. This is what makes the report credible.
 
+Each source carries a badge for **how trustworthy it is**:
+- 🔌 **Official data**: from a connector (Google Places, SEC EDGAR, data.gov.in, stock API)
+- 🌐 **Web**: from a search result
+- 🤖 **Estimate**: AI reasoning with no source; always shown as a range
+
+The same badge appears next to numbers in the competitor table, market section and ROI assumptions. In the competitor table, rating, review count and distance come straight from Google Places.
+
 ### 🟦 Stretch extras
 - 📄 Export report as PDF
 - 🔗 Shareable report link
@@ -425,7 +432,9 @@ Frontend builds against this shape on day zero (fake data first).
     "prerequisites": [ { "item": "FSSAI registration", "issuer": "FSSAI", "cost": 100, "days": 7, "source": "..." } ],
     "next_steps": { "d30": ["..."], "d60": ["..."], "d90": ["..."] },
     "mvp_features": ["..."],
-    "sources":   [ { "title": "...", "url": "...", "agent_id": "logistics" } ]
+    "sources":   [ { "title": "...", "url": "...", "agent_id": "logistics",
+                     "type": "connector",          // connector | web | estimate
+                     "connector": "google_places" } ]
   }
 }
 ```
