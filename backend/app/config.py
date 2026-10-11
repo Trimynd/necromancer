@@ -24,6 +24,10 @@ class Settings:
 
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
 
+    # SQLite now (zero setup); the local Postgres 18 install on port 27972 is
+    # ready to go whenever this needs a real multi-writer DB — see docs/db-and-connectors.md.
+    db_path: str = os.getenv("DB_PATH", "data/necromancer.db")
+
     max_agents: int = int(os.getenv("MAX_AGENTS", "5"))
     # how many times the Soul Binder may send a ghost back to redo its case
     max_binder_retries: int = int(os.getenv("MAX_BINDER_RETRIES", "2"))

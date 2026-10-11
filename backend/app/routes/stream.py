@@ -4,6 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.services import db
 from app.state import blackboard, sessions
 
 router = APIRouter(tags=["stream"])
@@ -12,9 +13,14 @@ router = APIRouter(tags=["stream"])
 @router.get("/api/session/{session_id}")
 async def get_session(session_id: str) -> dict:
     session = sessions.get(session_id)
-    if session is None:
+    if session is not None:
+        return session.model_dump()
+
+    # Not live in this process (e.g. restarted) — the durable summary survives in SQLite.
+    saved = await db.get_session(session_id)
+    if saved is None:
         raise HTTPException(status_code=404, detail="Unknown session_id")
-    return session.model_dump()
+    return saved
 
 
 @router.get("/api/stream/{session_id}")
