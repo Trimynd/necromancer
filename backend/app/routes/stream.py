@@ -4,7 +4,8 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.services import db
+from app.routes.problem import lookup, thread
+from app.services import db, history
 from app.state import blackboard, sessions
 
 router = APIRouter(tags=["stream"])
@@ -12,21 +13,38 @@ router = APIRouter(tags=["stream"])
 
 @router.get("/api/session/{session_id}")
 async def get_session(session_id: str) -> dict:
-    session = sessions.get(session_id)
-    if session is not None:
-        return session.model_dump()
+    snap = lookup(session_id)
+    if snap is None:
+        # Older runs saved before history files existed: the durable summary survives in SQLite.
+        snap = await db.get_session(session_id)
+        if snap is None:
+            raise HTTPException(status_code=404, detail="Unknown session_id")
+    return {**snap, "thread": thread(snap)}
 
-    # Not live in this process (e.g. restarted) — the durable summary survives in SQLite.
-    saved = await db.get_session(session_id)
+
+@router.get("/api/session/{session_id}/events")
+async def get_events(session_id: str) -> dict:
+    """Every recorded event of a run, so a past case renders fully (charts, testimony) in one pass."""
+    if session_id in sessions:
+        return {"status": str(sessions[session_id].status), "events": blackboard.history(session_id)}
+    saved = history.load(session_id)
     if saved is None:
         raise HTTPException(status_code=404, detail="Unknown session_id")
-    return saved
+    return {"status": saved["session"].get("status"), "events": saved["events"]}
 
 
 @router.get("/api/stream/{session_id}")
 async def stream(session_id: str, request: Request) -> StreamingResponse:
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Unknown session_id")
+        saved = history.load(session_id)
+        if saved is None:
+            raise HTTPException(status_code=404, detail="Unknown session_id")
+
+        async def replay():  # finished run from disk: send it all at once, then close
+            for e in saved["events"]:
+                yield f"event: {e['event']}\ndata: {json.dumps(e['data'], default=str)}\n\n"
+
+        return StreamingResponse(replay(), media_type="text/event-stream")
 
     queue = blackboard.subscribe(session_id)
 

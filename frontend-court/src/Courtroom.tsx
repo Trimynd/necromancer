@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { DOC_ICON, initials, parseVerdict, roundOf, sumSources, type CaseState, type Ghost } from './lib'
+import { DOC_ICON, initials, parseVerdict, roundOf, sumSources, verdictText, type CaseState, type Ghost } from './lib'
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -177,7 +177,7 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
     return () => { ro.disconnect(); clearTimeout(t) }
   }, [writing, s.ghosts])
 
-  const v = parseVerdict(s.verdict)
+  const v = parseVerdict(verdictText(s))
   const active = s.ghosts.filter((g) => g.phase !== 'dropped')
   const deliberating =
     s.status === 'in_court' && active.length > 0 && active.every((g) => g.phase === 'presented' || g.phase === 'accepted' || g.phase === 'sent_back') &&

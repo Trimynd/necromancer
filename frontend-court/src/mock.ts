@@ -62,7 +62,7 @@ const chunks = REPORT.match(/[\s\S]{1,60}/g) ?? []
 
 type Ev = [delay: number, event: string, data: unknown]
 
-const EVENTS: Ev[] = [
+const ALL: Ev[] = [
   [300, 'status', 'routing'],
   [400, 'documents', { items: [
     { id: 'doc1', name: 'tiffin-pitch-deck.pdf', kind: 'pdf', chars: 18420, pages: 12 },
@@ -146,7 +146,18 @@ const EVENTS: Ev[] = [
 ]
 
 /** Replays the mock run into `emit`. Returns a cancel function. */
-export function playMock(emit: (event: string, data: unknown) => void): () => void {
+export function playMock(emit: (event: string, data: unknown) => void, opts: { url?: string } = {}): () => void {
+  // With a website, the court reads it first (url + prompt are sent together).
+  const host = opts.url?.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
+  const EVENTS: Ev[] = !opts.url ? ALL : [
+    ALL[0],
+    [400, 'status', 'scraping'],
+    [1500, 'startup_data', {
+      latest_snapshot: { title: host, description: `Archived homepage of ${host}, last captured before it went quiet.`, snapshot_url: `https://web.archive.org/web/2024/${opts.url}` },
+      hn_discussions: [{ title: `Ask HN: What happened to ${host}?`, hn_url: 'https://news.ycombinator.com/' }],
+    }],
+    ...ALL.slice(1),
+  ]
   let cancelled = false
   let timer: ReturnType<typeof setTimeout>
   let i = 0

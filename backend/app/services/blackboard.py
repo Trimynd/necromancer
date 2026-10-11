@@ -36,6 +36,9 @@ class Blackboard:
         for queue in self._subscribers[session_id]:
             queue.put_nowait(payload)
 
+    def history(self, session_id: str) -> list[dict]:
+        return [{"event": e.event, "data": e.data} for e in self._history.get(session_id, [])]
+
     def subscribe(self, session_id: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue()
         for past in self._history[session_id]:

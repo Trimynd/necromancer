@@ -164,3 +164,12 @@ mark.hl { background: color-mix(in srgb, var(--ghost) 26%, transparent); color: 
 .skel { height: .8rem; border-radius: 4px; background: linear-gradient(90deg, var(--hair) 25%, color-mix(in srgb, var(--ink) 6%, transparent) 50%, var(--hair) 75%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .gauge-arc { transition: stroke-dasharray .8s ease-out; }
+
+/* Landing hero (ported from the teammate app): a photo under a dark wash, so text stays white in both themes. */
+.hero { background: #0b0f14; color: #fff; }
+.hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgb(8 10 14 / .92) 0%, rgb(8 10 14 / .6) 55%, rgb(8 10 14 / .15) 100%); }
+.hero > div { z-index: 1; }
+.stage-card { transition: border-color .15s, background-color .15s; }
+.stage-card:hover { border-color: var(--aura); }
+.stage-card.on { border-color: var(--aura); background: color-mix(in srgb, var(--aura) 10%, var(--sheet)); }
+.stage-card:focus-within { outline: 2px solid var(--seal); outline-offset: 2px; }

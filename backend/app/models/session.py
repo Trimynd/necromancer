@@ -26,6 +26,9 @@ class SessionState(BaseModel):
     problem_statement: str | None = None
     depth: str = "deep"  # "fast" | "deep"
     strict: bool = False
+    # Multi-turn: a follow-up points at the case it continues; prior_context briefs its council.
+    parent_id: str | None = None
+    prior_context: dict[str, Any] | None = Field(default=None, exclude=True)
     # Uploaded company documents: metadata is public (UI), full text stays server-side only.
     documents: list[dict] = Field(default_factory=list)
     document_texts: list[dict] = Field(default_factory=list, exclude=True)

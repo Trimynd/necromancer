@@ -22,7 +22,10 @@ from app.services import db, memory
 from app.services.blackboard import Blackboard
 from app.services.listings import companies_markdown, verify_companies
 from app.services.gemma_client import GemmaClient, call_log, usage_counter
-from app.services.research import research_mode, web_research
+import httpx
+
+from app.services import history
+from app.services.research import _HEADERS, _read_page, research_mode, web_research
 from app.services.scraper import scrape
 from app.utils.json_parser import JSONExtractionError, extract_json
 from app.utils.logger import get_logger
@@ -116,15 +119,24 @@ class Orchestrator:
             await self.blackboard.emit(session.session_id, "startup_data", data)
 
             snap = data.get("latest_snapshot") or {}
+            # Read the link itself too (an article, a competitor, a live site), not just its Wayback history.
+            live = {"text": "", "source": session.input_url, "title": f"Link: {session.input_url}", "source_type": "web"}
+            async with httpx.AsyncClient(timeout=10.0, headers=_HEADERS, follow_redirects=True) as client:
+                await _read_page(client, live)
+            if live["text"]:
+                await memory.add([live])
             await memory.add(
                 [{"text": f"{snap.get('title', '')} {snap.get('description', '')} {snap.get('excerpt', '')}",
                   "source": snap.get("snapshot_url", session.input_url), "title": snap.get("title", "")}]
                 + [{"text": d["title"] or "", "source": d["hn_url"], "title": d["title"] or ""} for d in data["hn_discussions"]]
             )
 
+            # The user's own question wins; the link becomes evidence for it.
             question = (
-                f"Dead fintech startup: {session.input_url} ({data['inferred_name']}). "
-                "What was it, why did it die, and should it be revived — if so, how?"
+                f"{session.problem_statement}\n\n(Link provided: {session.input_url} - {data['inferred_name']})"
+                if session.problem_statement else
+                f"Company at {session.input_url} ({data['inferred_name']}). "
+                "What was it, what happened to it, and should it be revived or copied — if so, how?"
             )
             route = Route(topic="startup_revival", complexity="complex", needs_web=True,
                           search_queries=[data["inferred_name"]])
@@ -159,7 +171,8 @@ class Orchestrator:
         usage_counter.set(usage)
         calls: list = []
         call_log.set(calls)
-        memory.evidence_tag.set({"session_id": session.session_id, "round": 0})
+        memory.evidence_tag.set({"session_id": session.session_id, "round": 0,
+                                 "scope": [session.session_id, *(session.prior_context or {}).get("session_ids", [])]})
         try:
             await flow
         except Exception as exc:
@@ -174,6 +187,10 @@ class Orchestrator:
             # Last event: the stream closes on "done", so usage/call_log must go out before it.
             await self.blackboard.emit(session.session_id, "status", session.status)
 
+        try:
+            history.save(session.session_id, session.model_dump(mode="json"), self.blackboard.history(session.session_id))
+        except Exception as exc:  # history is a convenience; never fail a finished run over it
+            logger.warning("Saving history failed for %s: %s", session.session_id, exc)
         await db.save_session(
             session.session_id, status=session.status, question=session.problem_statement or session.input_url,
             verdict=session.verdict, summary=session.summary, error=session.error,
@@ -182,6 +199,9 @@ class Orchestrator:
 
     async def _run(self, session: SessionState, question: str, route: Route, extra_context: dict | None = None) -> None:
         sid = session.session_id
+        if session.prior_context:
+            # Follow-up turn: the council starts from what the earlier case concluded.
+            extra_context = {**(extra_context or {}), "earlier_in_this_conversation": session.prior_context}
         session.route = route.model_dump()
         await self.blackboard.emit(sid, "route", session.route)
 

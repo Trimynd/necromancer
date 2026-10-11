@@ -268,13 +268,17 @@ export const sumSources = (rows?: { per_source?: Record<string, number>; chunks_
   )
 
 // ---- recent cases (localStorage) ----
-export interface Recent { id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean }
+export interface Recent {
+  id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean
+  /** Follow-ups: the case this one continues, and the first case of the thread. */
+  parent?: string; root?: string
+}
 export function loadRecent(): Recent[] {
   try { return JSON.parse(localStorage.getItem('recent-cases') || '[]') } catch { return [] }
 }
 export function saveRecent(r: Recent) {
   try {
-    const list = [r, ...loadRecent().filter((x) => x.id !== r.id)].slice(0, 5)
+    const list = [r, ...loadRecent().filter((x) => x.id !== r.id)].slice(0, 20)
     localStorage.setItem('recent-cases', JSON.stringify(list))
   } catch { /* storage blocked */ }
 }
@@ -308,19 +312,83 @@ export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx
 
 export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean }): Promise<string> {
   if (isMock()) return 'mock-' + Date.now().toString(36)
-  const res = body.text
-    ? await fetch('/api/problem', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem_statement: body.text, depth: body.depth, document_ids: body.document_ids ?? [], strict: !!body.strict }),
-      })
-    : await fetch('/api/revive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: body.url }),
-      })
+  const res = await fetch('/api/problem', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      problem_statement: body.text ?? '', url: body.url || null, depth: body.depth, document_ids: body.document_ids ?? [], strict: !!body.strict,
+    }),
+  })
   if (!res.ok) throw new Error(`The court couldn't open the case (${res.status}).`)
   return (await res.json()).session_id
+}
+
+/** POST /api/session/:id/followup -> the new (child) session id. */
+export async function followUp(id: string, body: { question: string; depth: string; strict?: boolean }): Promise<string> {
+  if (isMock() || id.startsWith('mock-')) return 'mock-' + Date.now().toString(36)
+  const res = await fetch(`/api/session/${id}/followup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question: body.question, depth: body.depth, strict: !!body.strict }),
+  })
+  if (!res.ok) throw new Error(`The court couldn't take the follow-up (${res.status}).`)
+  return (await res.json()).session_id
+}
+
+// ---- conversation thread ----
+export interface ThreadItem { session_id: string; question?: string; verdict?: string | null; status?: string }
+/** Mock mode has no server: rebuild the ancestor chain from recent cases. */
+export function threadFromRecent(id: string): ThreadItem[] {
+  const all = loadRecent()
+  const out: ThreadItem[] = []
+  for (let p = all.find((r) => r.id === id)?.parent; p; ) {
+    const r = all.find((x) => x.id === p)
+    if (!r) break
+    out.unshift({ session_id: r.id, question: r.text || r.title, verdict: r.verdict, status: 'done' })
+    p = r.parent
+  }
+  return out
+}
+export const rootOf = (id: string) => loadRecent().find((r) => r.id === id)?.root ?? id
+
+// ---- recorded event lists ----
+export interface Recorded { event: string; data: unknown }
+export const reduceAll = (events: Recorded[], base: CaseState) => events.reduce((s, e) => reduce(s, e.event, e.data), base)
+
+const EV_KEY = 'case-events'
+const EV_MAX = 10
+const EV_BYTES = 2_000_000
+type EvCache = Record<string, { status: string; events: Recorded[]; at: number }>
+const readEv = (): EvCache => { try { return JSON.parse(localStorage.getItem(EV_KEY) || '{}') } catch { return {} } }
+export const loadCachedEvents = (id: string) => readEv()[id]
+/** Keep the last 10 finished runs (~2 MB cap, oldest dropped first) so recent cases reopen instantly, even offline. */
+export function cacheEvents(id: string, status: string, events: Recorded[]) {
+  // The reducer only counts call_log entries; don't spend storage on their contents.
+  const slim = events.map((e) => (e.event === 'call_log' && Array.isArray(e.data) ? { ...e, data: e.data.map(() => 0) } : e))
+  const all = { ...readEv(), [id]: { status, events: slim, at: Date.now() } }
+  const ids = Object.keys(all).sort((a, b) => all[b].at - all[a].at)
+  let json = ''
+  while (ids.length) {
+    json = JSON.stringify(Object.fromEntries(ids.slice(0, EV_MAX).map((k) => [k, all[k]])))
+    if (json.length <= EV_BYTES || ids.length === 1) break
+    ids.pop()
+  }
+  try { localStorage.setItem(EV_KEY, json) } catch { /* quota or blocked: cache is best-effort */ }
+}
+
+/** GET /api/session/:id/events -> null on 404 (older backend / unknown id). */
+export async function fetchEvents(id: string): Promise<{ status: string; events: Recorded[] } | null> {
+  const res = await fetch(`/api/session/${id}/events`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(String(res.status))
+  return res.json()
+}
+
+/** Verdict text, or the "## 1. Verdict" section of the report while it's still streaming. */
+export function verdictText(s: CaseState) {
+  if (s.verdict) return s.verdict
+  const m = s.report.match(/##\s*1\.\s*Verdict[^\n]*\n([\s\S]*?)(?=\n##\s|$)/i)
+  return m?.[1]?.trim() ? m[1] : undefined
 }
 
 // ---- highlighting numbers / money / percentages / dates in testimony ----

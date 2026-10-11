@@ -32,6 +32,8 @@ RULES:
    a rival founder, a regulator, a supplier, a dead company's former CEO, a skeptic,
    an investor... whatever voice would surface the truth here. Each must have a distinct job.
 2. Name each ghost and write its system_prompt from the problem itself, not from a template.
+   Keep each system_prompt to 2 short sentences (who they are + what they must find out):
+   long prompts slow the whole court down.
    Give each ghost 1-2 specific "research" searches (and the source types that fit:
    web, news, reddit, hackernews, wikipedia, finance, jobs, reviews, economy, google).
 3. Assign tools to each agent ONLY from this registry: {available_tools}

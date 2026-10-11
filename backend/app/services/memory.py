@@ -143,7 +143,8 @@ def _search_sync(query: str, k: int, where: dict | None) -> list[dict]:
 
 async def add(docs: list[dict]) -> int:
     """docs: [{"text", "source", "title", "source_type", "published"}]. Returns chunks stored."""
-    return await asyncio.to_thread(_add_sync, docs, dict(evidence_tag.get()))
+    tag = {k: v for k, v in evidence_tag.get().items() if k != "scope"}
+    return await asyncio.to_thread(_add_sync, docs, tag)
 
 
 def add_in_background(docs: list[dict]) -> None:
@@ -172,8 +173,12 @@ async def rolling_window(query: str, session_id: str, round_num: int, k: int = 2
 def session_scope(where: dict | None = None) -> dict | None:
     """Limit a search to the current session's evidence, so one question's research never leaks
     into another's answer. Outside a session (scripts/tests) the search stays global."""
-    sid = evidence_tag.get().get("session_id")
-    return {**(where or {}), "session_id": sid} if sid else where
+    tag = evidence_tag.get()
+    sid, scope = tag.get("session_id"), tag.get("scope")
+    if not sid:
+        return where
+    # A follow-up may also read the evidence its earlier turns gathered (same conversation only).
+    return {**(where or {}), "session_id": scope if scope and len(scope) > 1 else sid}
 
 
 async def search_memory(query: str, k: int = 6) -> dict:

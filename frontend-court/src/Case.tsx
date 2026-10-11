@@ -1,33 +1,66 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useReducer, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Courtroom } from './Courtroom'
-import { Dashboard, Md, Report } from './Dashboard'
+import { Md, Report } from './Report'
 import { TestimonyCard, TestimonyPanel } from './Ghost'
 import {
-  DOC_ICON, fromSnapshot, initialState, isMock, loadRecent, parseVerdict, patchRecent, reduce, saveRecent, startCase, sumSources,
-  type CaseState,
+  cacheEvents, DOC_ICON, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, parseVerdict, patchRecent,
+  reduce, reduceAll, rootOf, saveRecent, startCase, sumSources, threadFromRecent, verdictText,
+  type CaseState, type Recorded, type ThreadItem,
 } from './lib'
 import { MOCK_TEXT, playMock } from './mock'
+import { FollowUpBox, LiveSteps, Thread } from './Thread'
+
+// recharts is the heavy part of the bundle; only fetch it once a case has something to chart.
+const Dashboard = lazy(() => import('./Dashboard').then((m) => ({ default: m.Dashboard })))
 
 const EVENTS = [
   'status', 'documents', 'scores', 'route', 'research', 'startup_data', 'manifest', 'pre_research', 'tool_call', 'agent_output', 'ghost_retry',
   'ghost_dropped', 'window', 'rulings', 'report_chunk', 'verdict', 'summary', 'usage', 'call_log', 'error',
 ]
 
-type Action = { event: string; data: unknown } | { event: 'load'; data: CaseState }
-const reducer = (s: CaseState, a: Action) => (a.event === 'load' ? (a.data as CaseState) : reduce(s, a.event, a.data))
+type Action =
+  | { event: 'load'; data: CaseState }
+  | { event: 'replay'; data: Recorded[] }
+  | { event: 'patch'; data: Partial<CaseState> }
+  | { event: string; data: unknown }
+const reducer = (s: CaseState, a: Action): CaseState => {
+  if (a.event === 'load') return a.data as CaseState
+  // A whole recorded run in one pass: no per-event renders, no animations.
+  if (a.event === 'replay') return reduceAll(a.data as Recorded[], { ...initialState, text: s.text, url: s.url })
+  if (a.event === 'patch') return { ...s, ...(a.data as Partial<CaseState>) }
+  return reduce(s, a.event, a.data)
+}
+const over = (st?: string) => st === 'done' || st === 'error'
 
-/** Owns the connection: snapshot first; finished cases render straight away, live ones open the SSE stream. */
+type Meta = { parent_id?: string | null; thread: ThreadItem[] }
+
+/**
+ * Owns the connection. Finished runs (from the local cache, then GET /events) are reduced in one pass and render
+ * instantly; live runs reduce what's recorded so far, then follow the SSE stream. Old backends (no /events) fall
+ * back to the snapshot.
+ */
 function useCaseStream(id: string) {
   const recent = loadRecent().find((r) => r.id === id)
-  const [s, dispatch] = useReducer(reducer, { ...initialState, text: recent?.text, url: recent?.url })
-  const [conn, setConn] = useState<'connecting' | 'live' | 'reconnecting' | 'closed' | 'missing'>('connecting')
+  const mock = isMock() || id.startsWith('mock-')
+  const [cached] = useState(() => loadCachedEvents(id))
+  const [s, dispatch] = useReducer(reducer, null, () => {
+    const base = { ...initialState, text: mock && !recent ? MOCK_TEXT : recent?.text, url: recent?.url }
+    return cached ? reduceAll(cached.events, base) : base
+  })
+  const [conn, setConn] = useState<'connecting' | 'live' | 'reconnecting' | 'closed' | 'missing'>(cached ? 'closed' : 'connecting')
+  const [meta, setMeta] = useState<Meta>(() => ({ parent_id: recent?.parent ?? null, thread: threadFromRecent(id) }))
 
   useEffect(() => {
-    if (isMock() || id.startsWith('mock-')) {
-      dispatch({ event: 'load', data: { ...initialState, text: recent?.text ?? MOCK_TEXT } })
+    if (mock) {
+      if (cached) return
       setConn('live')
-      return playMock((event, data) => dispatch({ event, data }))
+      const rec: Recorded[] = []
+      return playMock((event, data) => {
+        rec.push({ event, data })
+        dispatch({ event, data })
+        if (event === 'status' && over(data as string)) { cacheEvents(id, data as string, rec); setConn('closed') }
+      }, { url: recent?.url })
     }
     let es: EventSource | undefined
     let poll: ReturnType<typeof setInterval> | undefined
@@ -44,10 +77,19 @@ function useCaseStream(id: string) {
         try {
           const snap = await snapshot()
           if (dead || !snap) return
-          dispatch({ event: 'load', data: { ...fromSnapshot(snap), text: snap.problem_statement ?? recent?.text } })
-          if (snap.status === 'done' || snap.status === 'error') { clearInterval(poll); setConn('closed') }
+          dispatch({ event: 'load', data: { ...fromSnapshot(snap), text: snap.problem_statement || recent?.text, url: snap.input_url ?? recent?.url } })
+          if (over(snap.status)) { clearInterval(poll); setConn('closed') }
         } catch { /* keep polling */ }
       }, 3000)
+    }
+    // Pull the complete record of a finished run (usage/call_log land after the final status) and cache it.
+    const settle = async () => {
+      try {
+        const r = await fetchEvents(id)
+        if (dead) return
+        if (r && over(r.status)) { dispatch({ event: 'replay', data: r.events }); cacheEvents(id, r.status, r.events) }
+        else if (!r) { const snap = await snapshot(); if (!dead && snap?.usage) dispatch({ event: 'usage', data: snap.usage }) }
+      } catch { /* keep what we have */ }
     }
     const open = (retries: number) => {
       es = new EventSource(`/api/stream/${id}`)
@@ -58,11 +100,10 @@ function useCaseStream(id: string) {
           let data: unknown = (e as MessageEvent).data
           try { data = JSON.parse(data as string) } catch { /* plain string */ }
           dispatch({ event: name, data })
-          if (name === 'status' && (data === 'done' || data === 'error')) {
+          if (name === 'status' && over(data as string)) {
             es?.close()
             setConn('closed')
-            // usage/call_log are emitted after the final status, once the stream has closed.
-            setTimeout(() => snapshot().then((snap) => !dead && snap?.usage && dispatch({ event: 'usage', data: snap.usage })).catch(() => {}), 1500)
+            setTimeout(settle, 1500)
           }
         })
       }
@@ -76,26 +117,42 @@ function useCaseStream(id: string) {
       }
     }
 
-    snapshot()
+    // Question, website and thread come from the session; events carry the rest.
+    const meta = snapshot()
+    meta
       .then((snap) => {
-        if (dead) return
-        if (!snap) return setConn('missing')
-        const text = snap.problem_statement ?? recent?.text
-        if (snap.status === 'done' || snap.status === 'error') {
-          dispatch({ event: 'load', data: { ...fromSnapshot(snap), text } })
-          setConn('closed')
-        } else {
-          dispatch({ event: 'load', data: { ...initialState, text, url: snap.input_url ?? undefined } })
-          open(3)
-        }
+        if (dead || !snap) return
+        dispatch({ event: 'patch', data: { text: snap.problem_statement || snap.question || recent?.text, url: snap.input_url ?? snap.url ?? recent?.url } })
+        setMeta({ parent_id: snap.parent_id ?? null, thread: snap.thread ?? [] })
       })
-      .catch(() => !dead && open(3))
+      .catch(() => {})
+
+    // Pre-/events backend: the old snapshot path.
+    const legacy = () =>
+      meta.then((snap) => {
+        if (dead) return
+        if (!snap) return !cached && setConn('missing')
+        if (over(snap.status)) {
+          dispatch({ event: 'load', data: { ...fromSnapshot(snap), text: snap.problem_statement || recent?.text, url: snap.input_url ?? recent?.url } })
+          setConn('closed')
+        } else open(3)
+      })
+
+    fetchEvents(id)
+      .then((r) => {
+        if (dead) return
+        if (!r) return legacy()
+        dispatch({ event: 'replay', data: r.events })
+        if (over(r.status)) { cacheEvents(id, r.status, r.events); setConn('closed') }
+        else open(3)
+      })
+      .catch(() => !dead && !cached && open(3))
 
     return () => { dead = true; es?.close(); clearInterval(poll) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  return { s, conn }
+  return { s, conn, meta }
 }
 
 const STEPS = ['Read', 'Research', 'Council', 'Testimony', 'Rulings', 'Verdict', 'Report'] as const
@@ -151,26 +208,36 @@ function Elapsed({ running }: { running: boolean }) {
     const t = setInterval(() => tick((n) => n + 1), 1000)
     return () => clearInterval(t)
   }, [running])
-  if (!ran.current) return null
+  if (!ran.current || running) return null // live runs show the timer in the step list
   const sec = Math.round(((end ?? Date.now()) - start.current) / 1000)
-  return <span>{running ? 'Elapsed' : 'Finished in'} {Math.floor(sec / 60)}:{String(sec % 60).padStart(2, '0')}</span>
+  return <span>Finished in {Math.floor(sec / 60)}:{String(sec % 60).padStart(2, '0')}</span>
 }
 
+// One component instance per case, so refs (timers, scroll-once) and the instant first render reset on navigation.
 export function CasePage() {
+  const { id } = useParams()
+  return <CaseView key={id} />
+}
+
+function CaseView() {
   const params = useParams()
   const id = params.id ?? ''
   const ghostId = params['*']?.match(/^ghost\/([^/]+)/)?.[1]
   const { search } = useLocation()
   const base = `/case/${id}`
   const nav = useNavigate()
-  const { s, conn } = useCaseStream(id)
+  const { s, conn, meta } = useCaseStream(id)
+  const [since] = useState(() => loadRecent().find((r) => r.id === id)?.at ?? Date.now())
   const t0 = useRef(Date.now())
   const ranLive = useRef(false)
   const [t1, setT1] = useState<number>()
   const [retrying, setRetrying] = useState(false)
   const simple = s.route?.complexity === 'simple'
   const finished = s.status === 'done' || s.status === 'error'
-  const v = parseVerdict(s.verdict)
+  // The verdict section lights up as soon as "## 1. Verdict" streams in, before the verdict event.
+  const v = parseVerdict(verdictText(s))
+  // From the report's "Risks & open questions" (- **Assumption:** …), once it has streamed in.
+  const assumption = s.report.match(/\*\*Assumption:?\*\*:?\s*([^\n]+)/i)?.[1]
   if (!finished && s.status !== 'pending') ranLive.current = true
   useEffect(() => { if (finished) setT1((t) => t ?? Date.now()) }, [finished])
   const seconds = ranLive.current ? Math.round(((t1 ?? Date.now()) - t0.current) / 1000) : undefined
@@ -200,8 +267,13 @@ export function CasePage() {
     try {
       const old = loadRecent().find((r) => r.id === id)
       const depth = old?.depth ?? 'fast'
-      const newId = await startCase({ text: s.text, url: s.text ? undefined : s.url, depth, document_ids: old?.document_ids, strict: old?.strict })
-      saveRecent({ id: newId, title: (s.text || s.url || 'Case').slice(0, 80), text: s.text, url: s.url, depth, at: Date.now(), document_ids: old?.document_ids, strict: old?.strict })
+      const newId = meta.parent_id && s.text
+        ? await followUp(meta.parent_id, { question: s.text, depth, strict: old?.strict })
+        : await startCase({ text: s.text, url: s.url, depth, document_ids: old?.document_ids, strict: old?.strict })
+      saveRecent({
+        id: newId, title: (s.text || s.url || 'Case').slice(0, 80), text: s.text, url: s.url, depth, at: Date.now(), document_ids: old?.document_ids,
+        strict: old?.strict, parent: meta.parent_id ?? undefined, root: meta.parent_id ? rootOf(meta.parent_id) : undefined,
+      })
       nav(`/case/${newId}${isMock() ? '?mock=1' : ''}`)
     } catch { setRetrying(false) }
   }
@@ -223,6 +295,7 @@ export function CasePage() {
       {conn === 'reconnecting' && (
         <p role="status" className="no-print mb-3 rounded-md border border-hair px-3 py-2 text-sm text-ink-soft">Lost connection. Reconnecting…</p>
       )}
+      <Thread items={meta.thread} search={search} />
       {showStage && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />}
       {ghostId && <TestimonyPanel s={s} ghostId={ghostId} base={base} search={search} />}
 
@@ -236,6 +309,13 @@ export function CasePage() {
               <p className="text-ink-soft">{conn === 'connecting' ? 'Opening the case…' : 'Case'}</p>
             )}
             {s.url && <p className="mt-1 text-sm text-ink-soft">Website: <a className="underline" href={s.url} target="_blank" rel="noreferrer">{s.url}</a></p>}
+            {meta.parent_id && (
+              <p className="mt-1 text-sm text-ink-soft">
+                ↳ Continues from <Link className="underline" to={`/case/${meta.parent_id}${search}`}>case {meta.parent_id.slice(0, 8)}</Link>; the council was
+                briefed on its verdict.
+              </p>
+            )}
+            {!finished && <LiveSteps s={s} since={since} />}
           </section>
 
           {!!s.documents?.length && (
@@ -331,11 +411,19 @@ export function CasePage() {
                   {v.confidence != null && <p className="text-sm text-ink-soft">Confidence {v.confidence}%</p>}
                 </div>
               </div>
+              {assumption && (
+                <div className="mt-4 rounded-md border border-caution/50 bg-caution/10 px-4 py-3">
+                  <p className="text-xs font-medium uppercase tracking-wide fam-caution">The most dangerous assumption</p>
+                  <div className="md mt-1 text-[15px]"><Md>{assumption}</Md></div>
+                </div>
+              )}
             </section>
           )}
 
           {!simple && s.ghosts.length > 0 && (s.status === 'summarizing' || s.verdict || s.scores || finished) && (
-            <Dashboard s={s} seconds={seconds} />
+            <Suspense fallback={<div className="entry space-y-2" aria-label="Loading charts"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
+              <Dashboard s={s} seconds={seconds} />
+            </Suspense>
           )}
 
           {!simple && (s.report || s.status === 'summarizing') && (
@@ -375,8 +463,10 @@ export function CasePage() {
             </section>
           )}
 
+          {finished && (s.text || s.report) && <FollowUpBox id={id} family={v?.family} />}
+
           <footer className="entry flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
-            <Elapsed running={!finished} />
+            <Elapsed running={!finished && conn === 'live'} />
             {!!calls && <span>{calls} model calls</span>}
             {!!tokens && <span>{tokens.toLocaleString()} tokens</span>}
             <span>Status: {s.status.replace('_', ' ')}</span>
