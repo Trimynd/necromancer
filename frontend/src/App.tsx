@@ -291,16 +291,8 @@ export function Home() {
               </button>
             )}
             {sheets.length > 0 && (
-              <ul className="mt-2 flex flex-wrap gap-2" aria-label="Connected sheets">
-                {sheets.map((d) => (
-                  <li key={d.id} className="chip flex max-w-full items-center gap-1.5 !px-2 !py-0.5 text-sm">
-                    <span aria-hidden>{DOC_ICON[d.kind] ?? DOC_ICON.sheet}</span>
-                    <span className="truncate">{d.name}</span>
-                    <span className="shrink-0 text-ink-soft">{docLabel(d)}</span>
-                    <button type="button" className="shrink-0 px-1 text-ink-soft hover:text-ink" aria-label={`Remove ${d.name}`}
-                      onClick={() => setSheets(sheets.filter((x) => x.id !== d.id))}>✕</button>
-                  </li>
-                ))}
+              <ul className="mt-2 space-y-2" aria-label="Connected sheets">
+                {sheets.map((d) => <SheetPreview key={d.id} d={d} onRemove={() => setSheets(sheets.filter((x) => x.id !== d.id))} />)}
               </ul>
             )}
             {sheetErr && <p role="alert" className="fam-stop mt-2">{sheetErr}</p>}
@@ -419,5 +411,66 @@ function RecentCases({ recent }: { recent: Recent[] }) {
         </nav>
       )}
     </section>
+  )
+}
+
+/** Connected sheet: tab count, every tab, key numbers (computed by the backend) and a peek at the main tab. */
+function SheetPreview({ d, onRemove }: { d: Doc; onRemove: () => void }) {
+  const tabs = d.tabs ?? []
+  const stats = Object.entries(d.stats ?? {}).slice(0, 4)
+  const fmt = (n: number) => Math.abs(n) >= 1000 ? n.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : String(+n.toFixed(2))
+  const cols = (d.table?.columns ?? []).slice(0, 6)
+  return (
+    <li className="rounded-md border border-hair p-3 text-sm">
+      <div className="flex items-start gap-2">
+        <span aria-hidden>{DOC_ICON[d.kind] ?? DOC_ICON.sheet}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{d.name}</p>
+          <p className="text-xs text-ink-soft">
+            {docLabel(d)}{d.main_tab && tabs.length > 1 ? ` · charts use “${d.main_tab}”` : ''}{d.version && d.version > 1 ? ` · version ${d.version}` : ''}
+          </p>
+        </div>
+        <button type="button" className="shrink-0 px-1 text-ink-soft hover:text-ink" aria-label={`Remove ${d.name}`} onClick={onRemove}>✕</button>
+      </div>
+      {tabs.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Tabs">
+          {tabs.map((t) => (
+            <span key={t.name} className={`chip !px-2 text-xs ${t.name === d.main_tab ? '!border-[var(--seal)]' : ''}`}>
+              {t.name} · {t.rows} rows{t.numeric_columns.length ? ` · ${t.numeric_columns.length} number columns` : ' · notes'}
+            </span>
+          ))}
+        </div>
+      )}
+      {stats.length > 0 && (
+        <ul className="mt-2 grid grid-cols-2 gap-1.5" aria-label="Key numbers">
+          {stats.map(([c, st]) => {
+            const ch = st.change_pct
+            return (
+              <li key={c} className="rounded border border-hair px-2 py-1">
+                <p className="truncate text-xs text-ink-soft">{c}</p>
+                <p className="text-sm">{fmt(st.first)} → <b>{fmt(st.last)}</b>
+                  {ch != null && <span className={ch > 0 ? 'fam-go' : ch < 0 ? 'fam-stop' : ''}> {ch > 0 ? '▲' : ch < 0 ? '▼' : ''}{Math.abs(ch)}%</span>}
+                </p>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {d.table && d.table.rows.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-ink-soft">Preview{d.main_tab ? ` “${d.main_tab}”` : ''} ({d.table.rows.length} rows)</summary>
+          <div className="mt-1 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{cols.map((c) => <th key={c} className="px-1.5 py-1 text-left font-medium text-ink-soft">{c}</th>)}</tr></thead>
+              <tbody>
+                {d.table.rows.slice(0, 6).map((r, i) => (
+                  <tr key={i} className="border-t border-hair">{cols.map((_, j) => <td key={j} className="px-1.5 py-1">{String(r[j] ?? '')}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </li>
   )
 }

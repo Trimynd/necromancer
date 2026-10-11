@@ -49,6 +49,8 @@ export interface Doc {
   table?: Table; stats?: Record<string, ColStat>
   /** sheet only: the link it was read from, and 1, 2, 3… each time it is re-read after an edit. */
   source?: string; version?: number
+  /** xlsx / sheet: every tab of the workbook; `table`/`stats` are the main tab's. */
+  main_tab?: string; tabs?: { name: string; columns: string[]; rows: number; numeric_columns: string[] }[]
 }
 /** One column's before/after in a `data_changed` event. */
 export interface ColChange {
@@ -442,7 +444,8 @@ export async function compareWorkbooks(files: File[]): Promise<Comparison> {
 }
 export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', xlsx: '📗', docx: '📘', text: '📄' }
 export const docLabel = (d: Doc) =>
-  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : d.kind === 'xlsx' ? 'Excel · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
+  d.tabs && d.tabs.length > 1 ? `${d.kind === 'sheet' ? 'Google Sheet' : 'Excel'} · ${d.tabs.length} tabs`
+  : d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : d.kind === 'xlsx' ? 'Excel · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
     : d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''
 
 export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean; stage?: Stage }): Promise<string> {
