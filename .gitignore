@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Env
+.env
+backend/.env
+
+# Node (frontend, later)
+node_modules/
+.next/
+
+# Generated zombie sites
+backend/app/static/zombie/*.html
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,48 @@
+import asyncio
+from collections import defaultdict
+from typing import Any
+
+from app.models.blackboard import BlackboardEvent
+
+
+class Blackboard:
+    """Shared agent memory + SSE event bus, scoped per session.
+
+    In-memory by default so the backend runs with zero extra infra. If this
+    needs to scale across multiple processes later, swap the dict/queue
+    storage here for Redis (hset/hgetall + pubsub) behind the same interface.
+    """
+
+    def __init__(self):
+        self._store: dict[str, dict[str, Any]] = defaultdict(dict)
+        self._subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
+
+    async def write(self, session_id: str, agent_id: str, key: str, value: Any) -> None:
+        self._store[session_id][f"{agent_id}:{key}"] = value
+
+    async def read_relevant(self, session_id: str, agent_id: str) -> dict[str, Any]:
+        """Everything written to this session's board, except the agent's own entries."""
+        return {
+            k: v
+            for k, v in self._store[session_id].items()
+            if not k.startswith(f"{agent_id}:")
+        }
+
+    async def emit(self, session_id: str, event: str, data: Any) -> None:
+        payload = BlackboardEvent(event=event, data=data)
+        for queue in self._subscribers[session_id]:
+            queue.put_nowait(payload)
+
+    def subscribe(self, session_id: str) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue()
+        self._subscribers[session_id].append(queue)
+        return queue
+
+    def unsubscribe(self, session_id: str, queue: asyncio.Queue) -> None:
+        subs = self._subscribers.get(session_id)
+        if subs and queue in subs:
+            subs.remove(queue)
+
+    def clear_session(self, session_id: str) -> None:
+        self._store.pop(session_id, None)
+        self._subscribers.pop(session_id, None)
