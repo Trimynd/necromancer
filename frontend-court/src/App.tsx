@@ -4,22 +4,31 @@ import { connectSheet, DOC_ICON, docLabel, familyOf, isMock, kindOf, loadRecent,
 import { MOCK_SHEET, MOCK_TEXT } from './mock'
 
 export function Shell({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? '')
+  // Dark is the default look; light is opt-in.
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? 'dark')
   const toggle = () => {
-    const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
-    const next = dark ? 'light' : 'dark'
+    const next = theme === 'light' ? 'dark' : 'light'
     document.documentElement.dataset.theme = next
     try { localStorage.setItem('theme', next) } catch { /* ignore */ }
     setTheme(next)
   }
   return (
     <div className="min-h-screen">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        <Link to={isMock() ? '/?mock=1' : '/'} className="font-serif text-xl font-semibold">
-          Necromancer
+      <header className="mx-auto mb-4 flex max-w-6xl items-center justify-between border-b border-hair px-4 py-3">
+        <Link to={isMock() ? '/?mock=1' : '/'} className="flex items-center gap-2.5">
+          <span className="logo-box" aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m12.5 17-.5-1-.5 1h1z" /><path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z" />
+              <circle cx="15" cy="12" r="1" /><circle cx="9" cy="12" r="1" />
+            </svg>
+          </span>
+          <span>
+            <span className="block font-serif text-[13px] font-extrabold tracking-[.08em]">PROJECT NECROMANCER</span>
+            <span className="block font-mono text-[9px] tracking-[.14em] text-ink-soft">FROM IDEA TO AFTERLIFE</span>
+          </span>
         </Link>
-        <button onClick={toggle} className="btn btn-line text-sm" aria-label="Toggle light or dark theme">
-          ◐ Theme
+        <button onClick={toggle} className="btn btn-line !px-3 !py-1.5 font-mono text-[11px] uppercase tracking-wider" aria-label="Toggle light or dark theme">
+          {theme === 'light' ? '☾ Dark' : '☀ Light'}
         </button>
       </header>
       <main className="mx-auto max-w-6xl px-4 pb-16">{children}</main>
@@ -30,13 +39,13 @@ export function Shell({ children }: { children: ReactNode }) {
 // Where the business is on its lifeline. Guides the wording only; the router reads the situation itself.
 type Stage = 'Launch' | 'Grow' | 'Rescue' | 'Revive'
 const STAGES: { name: Stage; glyph: string; desc: string; color: string; placeholder: string }[] = [
-  { name: 'Launch', glyph: '✦', desc: 'An idea waiting for its first proof.', color: 'var(--go)',
+  { name: 'Launch', glyph: '✦', desc: 'An idea waiting for its first proof.', color: '#10b981',
     placeholder: 'I want to start a tiffin service in Pune for college students at ₹2500/month…' },
-  { name: 'Grow', glyph: '↗', desc: 'A living company reaching for more.', color: 'var(--ghost)',
+  { name: 'Grow', glyph: '↗', desc: 'A living company reaching for more.', color: '#3b82f6',
     placeholder: 'My coaching academy is profitable with 4,200 students. Should we open in two new cities?' },
-  { name: 'Rescue', glyph: '♥', desc: 'Sales or cash running low.', color: 'var(--caution)',
+  { name: 'Rescue', glyph: '♥', desc: 'Sales or cash running low.', color: '#f59e0b',
     placeholder: "My company sells mobile phones. Sales used to be good but they've halved since March…" },
-  { name: 'Revive', glyph: '☠', desc: 'Shut down, with something left behind.', color: 'var(--seal)',
+  { name: 'Revive', glyph: '☠', desc: 'Shut down, with something left behind.', color: '#a855f7',
     placeholder: 'Why did it die, and should I relaunch it in Pune? Add its old website below.' },
 ]
 const guessStage = (t: string): Stage | undefined =>
@@ -163,11 +172,13 @@ export function Home() {
       <section className="hero relative mb-8 overflow-hidden rounded-md" aria-labelledby="hero-title">
         <img src="/hero.webp" alt="" width={960} height={536} fetchPriority="high" className="absolute inset-0 h-full w-full object-cover" />
         <div className="relative max-w-[60ch] px-5 py-8 sm:px-8 sm:py-14">
-          <p className="text-xs font-medium uppercase tracking-[.14em] opacity-80">The business afterlife engine</p>
-          <h1 id="hero-title" className="mt-2 font-serif text-[36px] font-semibold leading-[1.02] sm:text-[60px]">
-            Every company leaves a ghost.
+          <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-[#87c9b8]">
+            <span className="pulse-dot" aria-hidden /> The business afterlife engine
+          </p>
+          <h1 id="hero-title" className="mt-3 font-serif text-[40px] font-extrabold leading-[.9] tracking-[-.06em] sm:text-[72px]">
+            Every company<br />leaves a <span className="accent">ghost.</span>
           </h1>
-          <p className="mt-3 max-w-[48ch] text-[15px] opacity-90 sm:text-base">
+          <p className="mt-4 max-w-[48ch] text-[15px] leading-7 text-[#a9c0c2] sm:text-base">
             Describe a business: an idea, one that's growing or struggling, or one that already died. A council of ghosts
             researches it live, the Soul Binder cross-examines them, and you get a verdict with sources.
           </p>
@@ -175,11 +186,14 @@ export function Home() {
       </section>
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <form onSubmit={submit} className="min-w-0 space-y-4">
-          <h2 className="font-serif text-[28px] leading-tight sm:text-[36px]">What's going on with your business?</h2>
+        <form onSubmit={submit} className="sheet min-w-0 space-y-4 p-4 sm:p-7">
+          <div>
+            <p className="eyebrow">01 / Your situation</p>
+            <h2 className="mt-2 font-serif text-[26px] font-semibold leading-tight sm:text-[32px]">What's going on with your business?</h2>
+          </div>
 
           <fieldset>
-            <legend className="mb-2 text-sm text-ink-soft">Where is it on its lifeline?</legend>
+            <legend className="eyebrow mb-3">02 / Where is it on its lifeline?</legend>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {STAGES.map((x) => (
                 <label
@@ -189,7 +203,7 @@ export function Home() {
                 >
                   <input type="radio" name="stage" value={x.name} checked={stage === x.name} onChange={() => setStage(x.name)} className="sr-only" />
                   <span aria-hidden className="text-lg" style={{ color: x.color }}>{x.glyph}</span>
-                  <span className="mt-1 block font-medium">{x.name}</span>
+                  <span className="mt-2 block font-serif text-sm font-bold uppercase tracking-[.06em]">{x.name}</span>
                   <span className="block text-xs leading-snug text-ink-soft">{x.desc}</span>
                 </label>
               ))}
@@ -199,7 +213,7 @@ export function Home() {
           <label className="sr-only" htmlFor="situation">Your situation</label>
           <textarea
             id="situation"
-            className="field min-h-40 font-serif text-[20px] [field-sizing:content]"
+            className="field min-h-40 text-[17px] leading-7 [field-sizing:content]"
             placeholder={st.placeholder}
             value={text}
             maxLength={4000}
@@ -310,7 +324,7 @@ export function Home() {
             <fieldset className="flex items-center gap-2 text-sm">
               <legend className="sr-only">Depth</legend>
               {(['fast', 'deep'] as const).map((d) => (
-                <label key={d} className={`btn btn-line cursor-pointer !px-3 !py-1 ${depth === d ? 'border-seal! text-seal' : ''}`}>
+                <label key={d} className={`btn btn-line cursor-pointer !px-3 !py-1 ${depth === d ? 'border-seal! text-seal bg-seal/10' : ''}`}>
                   <input type="radio" name="depth" value={d} checked={depth === d} onChange={() => setDepth(d)} className="sr-only" />
                   {d === 'fast' ? 'Fast' : 'Deep'}
                 </label>
@@ -328,8 +342,9 @@ export function Home() {
         </form>
 
         <aside className="min-w-0 space-y-8">
-          <section aria-labelledby="demos-h">
-            <h2 id="demos-h" className="font-serif text-xl">Try a case</h2>
+          <section aria-labelledby="demos-h" className="sheet p-5">
+            <p className="eyebrow">Quick summon</p>
+            <h2 id="demos-h" className="mt-1 font-serif text-xl font-semibold">Try a case</h2>
             <p className="text-xs text-ink-soft">Fills the form; the council researches it live.</p>
             <ul className="mt-2 space-y-1.5">
               {DEMOS.map((d) => (
@@ -354,7 +369,7 @@ export function Home() {
         </aside>
       </div>
 
-      <p className="mt-12 border-t border-hair pt-4 text-xs text-ink-soft">
+      <p className="mt-12 border-t border-hair pt-5 font-mono text-[10px] uppercase tracking-[.1em] text-ink-soft">
         Plain code checks the listings and the math. AI weighs the evidence. Every claim carries its source.
       </p>
     </div>
@@ -381,8 +396,9 @@ function RecentCases({ recent }: { recent: Recent[] }) {
     )
   }
   return (
-    <section aria-labelledby="recent-h">
-      <h2 id="recent-h" className="font-serif text-xl">Recent cases</h2>
+    <section aria-labelledby="recent-h" className="sheet p-5">
+      <p className="eyebrow">From the graveyard</p>
+      <h2 id="recent-h" className="mt-1 font-serif text-xl font-semibold">Recent cases</h2>
       <ul className="mt-1 divide-y divide-hair">
         {roots.map((r) => [row(r, false), ...kids(r.id).map((k) => row(k, true))])}
       </ul>
