@@ -1,0 +1,636 @@
+<title>Idea to Afterlife</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a company "lifeline" chart opens the page and doubles as the mode picker; the pipeline reads as a numbered vertical track. */
+:root{
+  --bg:#F3F5F7; --surface:#FFFFFF; --sunk:#E9EDF1; --ink:#12202B; --muted:#56687A; --line:#D6DDE4;
+  --accent:#0E6D68; --accent-ink:#FFFFFF; --accent-soft:#DDEFEC;
+  --launch:#2E8B4F; --grow:#2A68AC; --rescue:#B8700E; --revive:#7650AE;
+  --good:#2E8B4F; --warn:#B8700E; --bad:#C0403A;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0C1317; --surface:#131D23; --sunk:#0F181D; --ink:#E3EAEE; --muted:#93A5B1; --line:#24333C;
+  --accent:#4FC0B6; --accent-ink:#06201E; --accent-soft:#12302E;
+  --launch:#5BC27F; --grow:#70A9EA; --rescue:#E5A042; --revive:#AE8CE7;
+  --good:#5BC27F; --warn:#E5A042; --bad:#EC746D; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0C1317; --surface:#131D23; --sunk:#0F181D; --ink:#E3EAEE; --muted:#93A5B1; --line:#24333C;
+  --accent:#4FC0B6; --accent-ink:#06201E; --accent-soft:#12302E;
+  --launch:#5BC27F; --grow:#70A9EA; --rescue:#E5A042; --revive:#AE8CE7;
+  --good:#5BC27F; --warn:#E5A042; --bad:#EC746D; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.6;padding-inline:20px;padding-block:0 64px}
+.wrap{max-width:1040px;margin-inline:auto}
+h1,h2,h3{font-family:var(--display);line-height:1.1;text-wrap:balance;margin:0}
+h2{font-size:clamp(1.6rem,3.2vw,2.2rem);font-weight:800;letter-spacing:-.01em}
+h3{font-size:1.15rem;font-weight:700}
+p{margin:0}
+.eyebrow{font-family:var(--mono);font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.lede{color:var(--muted);max-width:62ch}
+section{padding-block:56px 8px;display:grid;gap:22px}
+.sec-head{display:grid;gap:10px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ---------- hero ---------- */
+.hero{padding-block:48px 8px;display:grid;gap:18px}
+.hero h1{font-size:clamp(2.6rem,7vw,4.6rem);font-weight:800;letter-spacing:-.025em}
+.hero h1 span{color:var(--accent)}
+.hero .sub{font-size:1.15rem;max-width:58ch}
+.quote{font-family:var(--display);font-weight:500;font-size:1.05rem;border-left:3px solid var(--accent);padding-left:14px;color:var(--ink);max-width:60ch}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--mono);font-size:.78rem;padding:4px 10px;border-radius:999px;background:var(--sunk);color:var(--muted);border:1px solid var(--line)}
+
+/* ---------- lifeline / modes ---------- */
+.lifeline{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 18px 8px;overflow-x:auto}
+.lifeline svg{display:block;width:100%;min-width:560px;height:auto}
+.lifeline .axis{stroke:var(--line);stroke-width:1}
+.lifeline .curve{fill:none;stroke:var(--ink);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.lifeline .revive-path{fill:none;stroke:var(--revive);stroke-width:2.5;stroke-dasharray:6 6}
+.lifeline .lbl{font-family:var(--mono);font-size:12px;fill:var(--muted)}
+.lifeline .pt{cursor:pointer}
+.lifeline .pt circle.halo{fill:transparent;stroke-width:2}
+.lifeline .pt text{font-family:var(--display);font-weight:700;font-size:16px}
+.lifeline .pt[aria-pressed="true"] circle.halo{stroke:currentColor}
+.tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.tab{appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:var(--radius);padding:12px 12px;text-align:left;cursor:pointer;display:grid;gap:2px;font:inherit}
+.tab b{font-family:var(--display);font-size:1.05rem;display:flex;align-items:center;gap:8px}
+.tab small{color:var(--muted);font-size:.82rem;line-height:1.35}
+.tab .dot{width:10px;height:10px;border-radius:50%;background:var(--c)}
+.tab[aria-selected="true"]{border-color:var(--c);box-shadow:inset 0 -3px 0 var(--c)}
+@media (max-width:640px){.tabs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.mode-panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:grid;gap:18px}
+.mode-top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:baseline;justify-content:space-between}
+.mode-top h3{font-size:1.5rem;color:var(--c)}
+.mode-top .says{font-family:var(--display);font-size:1.1rem}
+.verdicts{display:flex;flex-wrap:wrap;gap:6px}
+.vpill{font-family:var(--mono);font-size:.74rem;font-weight:500;padding:3px 9px;border-radius:999px;border:1px solid currentColor}
+.mode-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 28px}
+@media (max-width:720px){.mode-grid{grid-template-columns:minmax(0,1fr)}}
+.kv{display:grid;gap:4px;min-width:0}
+.kv dt{font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.kv dd{margin:0}
+.attack{border-left:3px solid var(--bad);padding-left:12px;font-style:italic}
+.signature{background:var(--sunk);border-radius:8px;padding:14px 16px}
+.sample{font-size:.92rem;color:var(--muted)}
+.sample b{color:var(--ink);font-weight:600}
+
+/* ---------- pipeline ---------- */
+.track{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.step{display:grid;grid-template-columns:64px minmax(0,1fr);gap:0 18px;position:relative}
+.step::before{content:"";position:absolute;left:31px;top:0;bottom:0;width:2px;background:var(--line)}
+.step:first-child::before{top:28px}.step:last-child::before{bottom:calc(100% - 28px)}
+.num{position:relative;z-index:1;width:64px;height:56px;display:grid;place-items:center}
+.num span{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-weight:500;font-size:.95rem;background:var(--surface);border:2px solid var(--k,var(--ink));color:var(--k,var(--ink))}
+.step-body{padding-block:10px 26px;display:grid;gap:8px;min-width:0}
+.step-body .who{font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--k,var(--muted))}
+.step-body .sees{font-size:.92rem;color:var(--muted)}
+.step-body .sees b{color:var(--ink);font-weight:600}
+.k-user{--k:var(--grow)} .k-ai{--k:var(--accent)} .k-agent{--k:var(--launch)} .k-devil{--k:var(--bad)} .k-out{--k:var(--rescue)}
+.learned{font-family:var(--mono);font-size:.82rem;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:14px 16px;display:grid;gap:4px;overflow-x:auto}
+.learned .ok{color:var(--good)} .learned .chk{color:var(--warn)} .learned .miss{color:var(--muted)}
+.learned .row{display:flex;justify-content:space-between;gap:16px;white-space:nowrap}
+.mini-table{width:100%;border-collapse:collapse;font-size:.88rem}
+.mini-table th,.mini-table td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.mini-table th{font-family:var(--mono);font-weight:500;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.scroll{overflow-x:auto}
+.prio{font-family:var(--mono);font-size:.72rem;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.p-must{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.p-should{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.p-stretch{background:color-mix(in srgb,var(--grow) 16%,transparent);color:var(--grow)}
+
+/* role maker demo */
+.rolemaker{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;display:grid;gap:14px}
+.pitches{display:flex;flex-wrap:wrap;gap:6px}
+.pbtn{appearance:none;font:inherit;font-size:.86rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:5px 12px;cursor:pointer}
+.pbtn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.reason{font-style:italic;color:var(--muted);font-size:.92rem}
+.agents{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.agent{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg);display:grid;gap:4px;animation:rise .35s ease both}
+.agent b{font-family:var(--display);font-size:.98rem}
+.agent span{font-family:var(--mono);font-size:.7rem;color:var(--launch);letter-spacing:.06em;text-transform:uppercase}
+@keyframes rise{from{transform:translateY(6px)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){.agent{animation:none}}
+
+/* ---------- report ---------- */
+.report-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.rcard{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px;display:grid;gap:4px;align-content:start}
+.rcard b{font-family:var(--display);font-size:1rem}
+.rcard p{font-size:.88rem;color:var(--muted)}
+.rcard.hl{border-color:var(--accent);background:var(--accent-soft)}
+
+/* ROI widget */
+.roi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;display:grid;gap:18px}
+.roi-head{display:flex;flex-wrap:wrap;gap:10px 20px;justify-content:space-between;align-items:center}
+.verdict{font-family:var(--display);font-weight:800;font-size:1.05rem;padding:6px 14px;border-radius:999px;color:#fff}
+.v-good{background:var(--good)} .v-warn{background:var(--warn)} .v-bad{background:var(--bad)}
+:root[data-theme="dark"] .verdict{color:#0C1317}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .verdict{color:#0C1317}}
+.roi-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:22px}
+@media (max-width:760px){.roi-body{grid-template-columns:minmax(0,1fr)}}
+.sliders{display:grid;gap:14px;align-content:start}
+.slider{display:grid;gap:4px}
+.slider label{display:flex;justify-content:space-between;gap:8px;font-size:.88rem}
+.slider output{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500}
+.slider input{width:100%;accent-color:var(--accent)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media (max-width:560px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--sunk);border-radius:8px;padding:10px 12px;display:grid;gap:2px}
+.kpi span{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kpi b{font-family:var(--display);font-size:1.35rem;font-variant-numeric:tabular-nums}
+.chart svg{width:100%;height:auto;display:block}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .zero{stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+.chart text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.82rem;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.note{font-size:.84rem;color:var(--muted)}
+
+/* rules */
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.rule{border-top:3px solid var(--accent);padding-top:12px;display:grid;gap:6px}
+.rule b{font-family:var(--display);font-size:1.02rem}
+.rule p{font-size:.9rem;color:var(--muted)}
+
+/* demo timeline */
+.timeline{display:flex;border-radius:8px;overflow:hidden;border:1px solid var(--line);min-width:640px}
+.seg{padding:10px 10px;display:grid;gap:4px;align-content:start;border-right:1px solid var(--bg);min-width:0}
+.seg:last-child{border-right:0}
+.seg .t{font-family:var(--mono);font-size:.7rem;opacity:.85}
+.seg b{font-family:var(--display);font-size:.92rem;line-height:1.2}
+.seg p{font-size:.78rem;line-height:1.35}
+.s-hook{background:var(--sunk);color:var(--ink)}
+.s-rescue{background:color-mix(in srgb,var(--rescue) 22%,var(--surface))}
+.s-launch{background:color-mix(in srgb,var(--launch) 20%,var(--surface))}
+.s-grow{background:color-mix(in srgb,var(--grow) 20%,var(--surface))}
+.s-revive{background:color-mix(in srgb,var(--revive) 20%,var(--surface))}
+.moments{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;counter-reset:m}
+.moment{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:.92rem}
+
+/* team */
+.team{width:100%;border-collapse:collapse;min-width:720px;font-size:.86rem}
+.team th,.team td{padding:10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.team thead th{font-family:var(--mono);font-weight:500;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.team tbody th{font-family:var(--mono);font-weight:500;white-space:nowrap}
+.team td.all{background:var(--accent-soft);font-weight:500}
+.team td.freeze{background:color-mix(in srgb,var(--grow) 12%,transparent)}
+
+/* decisions */
+.decisions{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.decisions li{display:flex;gap:10px;align-items:flex-start}
+.box{flex:none;width:18px;height:18px;border-radius:4px;border:2px solid var(--muted);margin-top:3px;display:grid;place-items:center;font-size:12px;line-height:1}
+.done .box{background:var(--good);border-color:var(--good);color:var(--surface)}
+.done span{color:var(--muted)}
+footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-size:.86rem;color:var(--muted)}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">MLH Hacktoberfest · Mixture of Agents · built on Gemma</p>
+  <h1>From idea to <span>afterlife</span>.</h1>
+  <p class="sub lede">Starting, growing, struggling or dead: pitch your business or upload your documents. Gemma builds a custom team of AI agents, they research it live, and you get a verdict with sources.</p>
+  <p class="quote">"Every business dies on an assumption nobody tested. We find yours before you spend a rupee."</p>
+  <div class="chips"><span class="chip">Pros / cons</span><span class="chip">Competitors</span><span class="chip">Market</span><span class="chip">Investment</span><span class="chip">ROI</span><span class="chip">Every claim sourced</span></div>
+</header>
+
+<!-- ================= MODES ================= -->
+<section id="modes" aria-labelledby="modes-h">
+  <div class="sec-head">
+    <p class="eyebrow">Four modes, one pipeline</p>
+    <h2 id="modes-h">Every stage of a company's life</h2>
+    <p class="lede">The user picks where they are on the curve, or the AI preselects it from their pitch or document. The mode changes the questions, the attack and the signature section. The pipeline stays the same.</p>
+  </div>
+
+  <div class="lifeline">
+    <svg viewBox="0 0 1000 250" role="img" aria-label="A company lifeline: it launches, grows to a peak, declines, flatlines, and can be revived.">
+      <line class="axis" x1="30" y1="222" x2="975" y2="222"/>
+      <path class="curve" d="M40 205 C 120 200, 160 150, 230 120 S 340 52, 390 56 S 470 70, 520 100 S 610 175, 660 196 S 720 214, 745 214 L 772 214 L 782 190 L 792 230 L 800 214 L 840 214"/>
+      <path class="revive-path" d="M840 214 C 880 214, 900 160, 960 118"/>
+      <text class="lbl" x="40" y="242">idea</text>
+      <text class="lbl" x="372" y="242">peak</text>
+      <text class="lbl" x="600" y="242">decline</text>
+      <text class="lbl" x="752" y="242">shut down</text>
+      <text class="lbl" x="905" y="242">restart</text>
+      <g class="pt" data-mode="launch" style="color:var(--launch)" tabindex="-1">
+        <circle class="halo" cx="120" cy="186" r="15"/><circle cx="120" cy="186" r="7" fill="var(--launch)"/>
+        <text x="96" y="162" fill="var(--launch)">Launch</text></g>
+      <g class="pt" data-mode="grow" style="color:var(--grow)" tabindex="-1">
+        <circle class="halo" cx="330" cy="68" r="15"/><circle cx="330" cy="68" r="7" fill="var(--grow)"/>
+        <text x="305" y="40" fill="var(--grow)">Grow</text></g>
+      <g class="pt" data-mode="rescue" style="color:var(--rescue)" tabindex="-1">
+        <circle class="halo" cx="580" cy="150" r="15"/><circle cx="580" cy="150" r="7" fill="var(--rescue)"/>
+        <text x="596" y="138" fill="var(--rescue)">Rescue</text></g>
+      <g class="pt" data-mode="revive" style="color:var(--revive)" tabindex="-1">
+        <circle class="halo" cx="900" cy="168" r="15"/><circle cx="900" cy="168" r="7" fill="var(--revive)"/>
+        <text x="850" y="128" fill="var(--revive)">Revive</text></g>
+    </svg>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Modes">
+    <button class="tab" role="tab" id="tab-launch" data-mode="launch" style="--c:var(--launch)" aria-controls="mode-panel"><b><i class="dot"></i>Launch</b><small>New idea</small></button>
+    <button class="tab" role="tab" id="tab-grow" data-mode="grow" style="--c:var(--grow)" aria-controls="mode-panel"><b><i class="dot"></i>Grow</b><small>Working company</small></button>
+    <button class="tab" role="tab" id="tab-rescue" data-mode="rescue" style="--c:var(--rescue)" aria-controls="mode-panel"><b><i class="dot"></i>Rescue</b><small>Numbers going down</small></button>
+    <button class="tab" role="tab" id="tab-revive" data-mode="revive" style="--c:var(--revive)" aria-controls="mode-panel"><b><i class="dot"></i>Revive</b><small>Shut down, restarting</small></button>
+  </div>
+
+  <div class="mode-panel" id="mode-panel" role="tabpanel" aria-live="polite"></div>
+</section>
+
+<!-- ================= PIPELINE ================= -->
+<section id="pipeline" aria-labelledby="pipe-h">
+  <div class="sec-head">
+    <p class="eyebrow">The pipeline</p>
+    <h2 id="pipe-h">What happens, step by step</h2>
+    <p class="lede">Eight steps from first words to final verdict. Blue steps involve the user, teal steps are Gemma thinking, green is the agent team, red is the attack.</p>
+  </div>
+
+  <ol class="track">
+    <li class="step k-user">
+      <div class="num"><span>1</span></div>
+      <div class="step-body">
+        <p class="who">User</p>
+        <h3>Pitch and pick a mode</h3>
+        <p>The user describes the business in a paragraph, uploads documents, or both. The AI preselects one of the four mode cards and the user confirms with one click.</p>
+        <p class="sees"><b>Sees:</b> text box · upload area · 4 mode cards · sample companies</p>
+      </div>
+    </li>
+    <li class="step k-ai">
+      <div class="num"><span>1b</span></div>
+      <div class="step-body">
+        <p class="who">Gemma</p>
+        <h3>Document understanding</h3>
+        <p>Uploaded files become facts before any question is asked. One Gemma call maps a PDF to profile fields and a suggested mode. Spreadsheets are read by plain code, because numbers must be exact.</p>
+        <div class="learned" aria-label="Example of the What I learned card">
+          <div>From "CompanyProfile.pdf" + "sales.csv" I learned:</div>
+          <div class="row"><span class="ok">✓ Mobile phone retail · 2 shops, Pune</span><span>p.1</span></div>
+          <div class="row"><span class="ok">✓ 12 months of sales: ₹18L → ₹9L</span><span>sales.csv · exact</span></div>
+          <div class="row"><span class="chk">⚠ Team: 6 staff</span><span>p.1 · please check</span></div>
+          <div class="row"><span class="miss">? Cash in bank: not found</span><span>will ask</span></div>
+          <div>→ Mode: Rescue &nbsp;[Edit] [Looks right →]</div>
+        </div>
+        <div class="scroll">
+          <table class="mini-table">
+            <thead><tr><th>File</th><th>How we read it</th><th>Priority</th></tr></thead>
+            <tbody>
+              <tr><td>PDF (profile, pitch deck)</td><td>Sent straight to the model; fallback is text extraction</td><td><span class="prio p-must">Must</span></td></tr>
+              <tr><td>CSV / Excel (monthly numbers)</td><td>Plain code, never the AI; feeds the Grow and Rescue charts</td><td><span class="prio p-must">Must</span></td></tr>
+              <tr><td>Images (dashboard screenshot, ledger photo)</td><td>The model reads images</td><td><span class="prio p-should">Should</span></td></tr>
+              <tr><td>DOCX / PPTX</td><td>Text extraction, or ask for a PDF</td><td><span class="prio p-stretch">Stretch</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="sees"><b>Rules:</b> files are processed in memory and never stored · document text is data, never instructions · numbers from a PDF are marked "please check" · max 3 files, 10 pages, 5 MB each</p>
+      </div>
+    </li>
+    <li class="step k-user">
+      <div class="num"><span>2</span></div>
+      <div class="step-body">
+        <p class="who">User + Gemma</p>
+        <h3>Intake: ask only what's missing</h3>
+        <p>About six fixed core questions per mode, which the charts and ROI need, then up to four adaptive follow-ups. Each follow-up follows the mode's playbook and shows why it's being asked.</p>
+        <p class="sees"><b>Example (Rescue):</b> "Are fewer people coming in, or are they coming but not buying?" <i>Asking because it separates a footfall problem from a conversion problem.</i></p>
+      </div>
+    </li>
+    <li class="step k-ai">
+      <div class="num"><span>3</span></div>
+      <div class="step-body">
+        <p class="who">Gemma · Role Maker</p>
+        <h3>The team is invented, not hardcoded</h3>
+        <p>Gemma reads the profile and decides how many agents to create, what each is called and what it researches. One rule: every report section must be covered by at least one agent.</p>
+        <div class="rolemaker">
+          <div class="pitches" role="group" aria-label="Example pitches">
+            <button class="pbtn" data-pitch="tiffin" aria-pressed="true">Tiffin delivery, Pune</button>
+            <button class="pbtn" data-pitch="bnpl" aria-pressed="false">BNPL for students</button>
+            <button class="pbtn" data-pitch="gym" aria-pressed="false">Gym chain, Tier-2</button>
+            <button class="pbtn" data-pitch="phone" aria-pressed="false">Phone shop in decline</button>
+          </div>
+          <p class="reason" id="reason"></p>
+          <div class="agents" id="agents" aria-live="polite"></div>
+        </div>
+      </div>
+    </li>
+    <li class="step k-agent">
+      <div class="num"><span>4</span></div>
+      <div class="step-body">
+        <p class="who">Agent team · in parallel</p>
+        <h3>Research with sources</h3>
+        <p>Each agent searches the web for its own task, keeps every source link and reports in the same shape: core assumption, evidence for and against, risks tagged external, internal or assumption, and countermeasures.</p>
+        <p class="sees"><b>Sees:</b> live status per agent (searching, reading, analysing, done) and a live feed of findings</p>
+      </div>
+    </li>
+    <li class="step k-devil">
+      <div class="num"><span>5</span></div>
+      <div class="step-body">
+        <p class="who">Devil's advocate</p>
+        <h3>One call tries to kill the plan</h3>
+        <p>It reads every finding, writes the strongest argument against, picks the riskiest assumption and says whether the plan survives. The attack depends on the mode; pick a mode above to see it.</p>
+      </div>
+    </li>
+    <li class="step k-ai">
+      <div class="num"><span>6</span></div>
+      <div class="step-body">
+        <p class="who">Gemma · Synthesis</p>
+        <h3>Merge, resolve, score</h3>
+        <p>Combines the findings and the attack, resolves contradictions, scores six dimensions and writes the verdict.</p>
+      </div>
+    </li>
+    <li class="step k-out">
+      <div class="num"><span>7</span></div>
+      <div class="step-body">
+        <p class="who">Report</p>
+        <h3>The same sections every time</h3>
+        <p>The agents change with every business; the report doesn't. Synthesis maps whatever they found onto a fixed set of sections, shown below.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<!-- ================= REPORT ================= -->
+<section id="report" aria-labelledby="report-h">
+  <div class="sec-head">
+    <p class="eyebrow">The output</p>
+    <h2 id="report-h">What the report shows</h2>
+    <p class="lede">Twelve sections, plus the signature section of the chosen mode. Highlighted cards are the moments judges remember.</p>
+  </div>
+  <div class="report-grid">
+    <div class="rcard hl"><b>Verdict</b><p>Go, pivot or no-go with a 0–100 viability score and the top 3 reasons.</p></div>
+    <div class="rcard hl"><b>Riskiest assumption</b><p>"Your plan assumes students will pay ₹2,500 a month. Test this first," with a cheap way to test it.</p></div>
+    <div class="rcard"><b>Strongest argument against you</b><p>The devil's advocate attack, and whether the plan survives it.</p></div>
+    <div class="rcard"><b>Score breakdown</b><p>Six dimensions from 0 to 10. Weights are fixed in code.</p></div>
+    <div class="rcard"><b>Pros and cons</b><p>Specific to this user's situation, with impact and sources.</p></div>
+    <div class="rcard"><b>Competitors</b><p>Name, what they do, pricing, funding and how you differ.</p></div>
+    <div class="rcard"><b>Market analysis</b><p>Total, reachable and winnable market, target customer, trends, sources.</p></div>
+    <div class="rcard"><b>Investment</b><p>Startup cost, monthly burn, how long the budget lasts, funding route.</p></div>
+    <div class="rcard hl"><b>ROI with live sliders</b><p>24 months, three scenarios, break-even and LTV:CAC. Try it below.</p></div>
+    <div class="rcard"><b>Before you launch</b><p>Licences and registrations needed, such as FSSAI, GST or RBI.</p></div>
+    <div class="rcard"><b>Next steps</b><p>A 30/60/90 day plan that starts with testing the riskiest assumption.</p></div>
+    <div class="rcard"><b>Sources</b><p>Every link the agents used, grouped by agent.</p></div>
+  </div>
+
+  <div class="roi" aria-labelledby="roi-h">
+    <div class="roi-head">
+      <div>
+        <p class="eyebrow">Live example · tiffin service, Pune</p>
+        <h3 id="roi-h">Code does the maths, not the AI</h3>
+      </div>
+      <span class="verdict" id="verdict">PIVOT</span>
+    </div>
+    <div class="roi-body">
+      <div class="sliders">
+        <div class="slider"><label for="s-price">Price per customer / month <output id="o-price"></output></label><input type="range" id="s-price" min="1800" max="4000" step="100" value="2500"></div>
+        <div class="slider"><label for="s-new">New customers / month <output id="o-new"></output></label><input type="range" id="s-new" min="10" max="80" step="1" value="30"></div>
+        <div class="slider"><label for="s-churn">Customers leaving / month <output id="o-churn"></output></label><input type="range" id="s-churn" min="2" max="20" step="1" value="8"></div>
+        <div class="slider"><label for="s-fixed">Fixed monthly cost <output id="o-fixed"></output></label><input type="range" id="s-fixed" min="80000" max="300000" step="10000" value="180000"></div>
+        <p class="note">Fixed assumptions: startup cost ₹8L · food and delivery ₹1,700 per customer · growth 4% a month · acquisition cost ₹1,200 per customer. In the product, each number shows whether it came from the user, from research, or is an AI estimate.</p>
+      </div>
+      <div style="display:grid;gap:12px;min-width:0">
+        <div class="kpis">
+          <div class="kpi"><span>Break-even</span><b id="k-be"></b></div>
+          <div class="kpi"><span>ROI at 24 mo</span><b id="k-roi"></b></div>
+          <div class="kpi"><span>LTV : CAC</span><b id="k-ltv"></b></div>
+          <div class="kpi"><span>Peak cash needed</span><b id="k-peak"></b></div>
+        </div>
+        <div class="chart" id="chart"></div>
+        <div class="legend"><span><i style="background:var(--good)"></i>Optimistic</span><span><i style="background:var(--ink)"></i>Base</span><span><i style="background:var(--bad)"></i>Pessimistic</span><span>Cumulative profit, ₹ lakh</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= RULES ================= -->
+<section id="rules" aria-labelledby="rules-h">
+  <div class="sec-head">
+    <p class="eyebrow">Credibility</p>
+    <h2 id="rules-h">Rules for numbers</h2>
+    <p class="lede">Judges will push hardest on ROI. An AI inventing a single "240% ROI" won't hold up, so these five rules apply everywhere.</p>
+  </div>
+  <div class="rules">
+    <div class="rule"><b>Code does the maths</b><p>Gemma estimates assumptions. Plain code calculates break-even, ROI and LTV:CAC.</p></div>
+    <div class="rule"><b>Show the assumptions</b><p>Each one marked "from you", "from research" with a link, or "AI estimate".</p></div>
+    <div class="rule"><b>Make them sliders</b><p>The user corrects any assumption and the verdict updates instantly in the browser.</p></div>
+    <div class="rule"><b>Ranges, not one number</b><p>"ROI 18–35% by year 2, break-even in months 14–20."</p></div>
+    <div class="rule"><b>No uncited statistics</b><p>If we can't link it, we don't say it, in the product or in the pitch.</p></div>
+  </div>
+</section>
+
+<!-- ================= DEMO ================= -->
+<section id="demo" aria-labelledby="demo-h">
+  <div class="sec-head">
+    <p class="eyebrow">Three minutes on stage</p>
+    <h2 id="demo-h">The demo</h2>
+    <p class="lede">One mode runs live, the other three play back as saved runs. Every sample can replay its saved run if the Wi-Fi or the API fails.</p>
+  </div>
+  <div class="scroll">
+    <div class="timeline">
+      <div class="seg s-hook" style="flex:15"><span class="t">0:00</span><b>Hook</b><p>"From idea to afterlife." Show the 4 cards.</p></div>
+      <div class="seg s-rescue" style="flex:95"><span class="t">0:15 · live</span><b>Rescue: the phone shop</b><p>Drop PDF + CSV → profile fills itself → 1–2 questions → team invented → research → "where you're failing" → the ONE thing → drag the EMI slider</p></div>
+      <div class="seg s-launch" style="flex:20"><span class="t">1:50</span><b>Launch</b><p>Pre-mortem, riskiest assumption</p></div>
+      <div class="seg s-grow" style="flex:20"><span class="t">2:10</span><b>Grow</b><p>How a new entrant would destroy you</p></div>
+      <div class="seg s-revive" style="flex:15"><span class="t">2:30</span><b>Revive</b><p>Autopsy</p></div>
+      <div class="seg s-hook" style="flex:15"><span class="t">2:45</span><b>Close</b><p>Same pipeline, 4 situations</p></div>
+    </div>
+  </div>
+  <div class="moments">
+    <div class="moment"><b>Drop a PDF</b> and the profile fills itself in.</div>
+    <div class="moment"><b>The team is invented live</b>, different for every business.</div>
+    <div class="moment"><b>"Your riskiest assumption is…"</b> or <b>"the ONE thing"</b>.</div>
+    <div class="moment"><b>Drag a slider</b> and the verdict changes colour.</div>
+  </div>
+</section>
+
+<!-- ================= TEAM ================= -->
+<section id="team" aria-labelledby="team-h">
+  <div class="sec-head">
+    <p class="eyebrow">6 hours · 3 people</p>
+    <h2 id="team-h">Who builds what</h2>
+  </div>
+  <div class="scroll">
+    <table class="team">
+      <thead><tr><th>Hour</th><th>A · AI / backend</th><th>B · Agents / data</th><th>C · Frontend</th></tr></thead>
+      <tbody>
+        <tr><th>0:00–0:30</th><td class="all" colspan="3">Everyone: agree JSON shapes · repo · test all 3 API keys, web search and PDF input</td></tr>
+        <tr><th>0:30–2:00</th><td>Document understanding · intake with all 4 playbooks</td><td>Generic agent runner with web search · key rotation · 4 sample PDFs + 2 CSVs</td><td>Pitch box · upload · mode cards · intake UI on fake data</td></tr>
+        <tr><th>2:00–3:30</th><td>Role Maker · devil's advocate (4 variants) · synthesis</td><td>ROI and LTV:CAC maths · CSV → monthly table</td><td>Agent cards · live status · shared report sections</td></tr>
+        <tr><th>3:30–4:30</th><td>Connect everything end to end</td><td>Run all 4 samples, save each run as a fallback</td><td>4 signature sections · sliders</td></tr>
+        <tr><th>4:30–5:15</th><td class="freeze">Feature freeze: bug fixes only</td><td>Devpost write-up · backup video</td><td>Polish UI</td></tr>
+        <tr><th>5:15–6:00</th><td class="all" colspan="3">Everyone: rehearse the demo twice · submit early</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">API keys: 3 keys from 3 different accounts give about 3× the free quota. Calls rotate across keys and move to the next one on a rate-limit error. One key stays untouched during the build so its daily quota is full for judging. About 8–12 calls per run.</p>
+</section>
+
+<!-- ================= RISKS ================= -->
+<section id="risks" aria-labelledby="risks-h">
+  <div class="sec-head">
+    <p class="eyebrow">Trade-offs</p>
+    <h2 id="risks-h">What it costs, and how we handle it</h2>
+  </div>
+  <div class="scroll">
+    <table class="mini-table">
+      <thead><tr><th>Choice</th><th>Risk</th><th>How we handle it</th></tr></thead>
+      <tbody>
+        <tr><td><b>Dynamic agents</b></td><td>Gemma creates a strange or overlapping team</td><td>Every report section must be covered; fallback team if the output is invalid</td></tr>
+        <tr><td><b>Live web search</b></td><td>30–90 s wait, can fail; Gemma's search through the API is untested</td><td>Live status covers the wait; test first; Gemini as backup</td></tr>
+        <tr><td><b>Parallel agents</b></td><td>8–12 API calls per run</td><td>3 keys from different accounts, rotation, a demo key kept untouched</td></tr>
+        <tr><td><b>AI-estimated numbers</b></td><td>Can be wrong; judges push hardest on ROI</td><td>Assumptions with sources, ranges, sliders</td></tr>
+        <tr><td><b>All 4 modes first-class</b></td><td>The biggest scope risk</td><td>Shared pipeline: each mode is prompts plus one report section; fixed cut order</td></tr>
+        <tr><td><b>Document upload</b></td><td>Misread numbers, private data, hidden instructions in a file</td><td>User confirms what was learned; CSV read by code; never stored; text treated as data</td></tr>
+        <tr><td><b>Live demo</b></td><td>Wi-Fi or API fails on stage</td><td>A saved run for every mode, replayed with the same animations</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= DECISIONS ================= -->
+<section id="decisions" aria-labelledby="dec-h">
+  <div class="sec-head">
+    <p class="eyebrow">Status</p>
+    <h2 id="dec-h">Decisions</h2>
+  </div>
+  <ul class="decisions">
+    <li class="done"><i class="box">✓</i><span>All 4 modes are first-class, each with a sample company and a saved run</span></li>
+    <li class="done"><i class="box">✓</i><span>4 mode cards with the AI preselecting one</span></li>
+    <li class="done"><i class="box">✓</i><span>Document upload: PDF and CSV/Excel required, images if time allows</span></li>
+    <li class="done"><i class="box">✓</i><span>Grow includes threats; Revive is for owners restarting their own company</span></li>
+    <li><i class="box"></i><span>Web search: does Gemma support it through the API, or do we use Gemini for research?</span></li>
+    <li><i class="box"></i><span>PDF input: does Gemma accept PDFs through the API?</span></li>
+    <li><i class="box"></i><span>Scope: any business, or fintech only?</span></li>
+    <li><i class="box"></i><span>Project name</span></li>
+  </ul>
+</section>
+
+<footer>All numbers on this page are example data for explaining the product, not research results.</footer>
+</div>
+
+<script>
+const MODES = {
+  launch:{name:"Launch",c:"var(--launch)",says:"“I want to start something.”",q:"Should I build this?",
+    verdicts:[["GO","var(--good)"],["PIVOT","var(--warn)"],["NO-GO","var(--bad)"]],
+    core:"Budget · location and market · team and skills · timeline · what exists already · price and running cost",
+    adaptive:"Is the idea real? Who exactly is the customer, has anyone paid yet, what's the unfair advantage, how will the first 100 customers find you.",
+    agents:"Market Analyst · Pricing Analyst · Reality Checker",
+    attack:"Pre-mortem: “It's 12 months from now and you're dead. Why?”",
+    sig:"Riskiest assumption",sigText:"The one thing the plan depends on that nobody has tested, why it matters, and a cheap way to test it this month.",
+    sample:["Tiffin subscriptions for students, Pune","Demand is real but margins are thin: pivot by adding corporate tiffins."]},
+  grow:{name:"Grow",c:"var(--grow)",says:"“My company works. Make it better.”",q:"Where can I grow, and what could kill me?",
+    verdicts:[["TOP 3 LEVERS","var(--good)"],["GROWTH SCORE","var(--grow)"],["THREAT LEVEL","var(--bad)"]],
+    core:"Revenue and profit · customers and growth · team and biggest costs · acquisition channels · what's working · the goal",
+    adaptive:"Where's the bottleneck? Dependence on one channel, demand vs. capacity, the most profitable segment, the biggest threat, what protects you.",
+    agents:"Ops Efficiency Auditor · Growth Channel Analyst · Competitor Watcher · Review Miner",
+    attack:"Red team: “If I were a new entrant, how would I destroy you?” Plus: “What if a big platform ships this for free?”",
+    sig:"Growth levers + threats",sigText:"Levers ranked by impact and effort, then threats: how a new entrant would destroy you, and what actually protects you today.",
+    sample:["3-location coaching institute","70% of students come from one channel; a free online platform is the threat."]},
+  rescue:{name:"Rescue",c:"var(--rescue)",says:"“My numbers are going down.”",q:"Why am I declining, and how do I fix it?",
+    verdicts:[["RECOVERABLE","var(--good)"],["RESTRUCTURE","var(--warn)"],["WIND DOWN","var(--bad)"]],
+    core:"Last 6–12 months of revenue, users and costs · when the decline started · what changed · customers lost vs. gained · cash in the bank · what you've tried",
+    adaptive:"Where exactly is it breaking? Fewer customers or less per customer, footfall or conversion, which segment fell first, what changed around then.",
+    agents:"Churn Investigator · Local Competition Scout · Sales Data Investigator · Review Miner",
+    attack:"“Why will the turnaround fail too?”",
+    sig:"Where you're failing + the ONE thing",sigText:"The sales trend with the moment it broke, root causes ranked by share of the decline, and one customer, one channel, one action for this week.",
+    sample:["Phone shop, 2 stores, Pune","A chain store opened nearby and buyers moved online; EMI through only one bank is the fixable cause."]},
+  revive:{name:"Revive",c:"var(--revive)",says:"“My company died. I want to restart it.”",q:"Why did it die, and what's different now?",
+    verdicts:[["REVIVE","var(--good)"],["REVIVE WITH PIVOT","var(--warn)"],["STAY DEAD","var(--bad)"]],
+    core:"What it did and who paid · when it shut down · why you think it died · peak revenue and users · what's left · budget to restart",
+    adaptive:"Was the cause of death fixable? The real cause vs. the founder's belief, whether the blocker is gone, whether old users can still be reached.",
+    agents:"Autopsy Analyst · What-Changed-Since Scout · Asset Extractor",
+    attack:"“Why will it die a second time?”",
+    sig:"Autopsy",sigText:"Cause of death, what's different now, and the assets you can reuse: brand, users, code, licences.",
+    sample:["Grocery delivery app, shut down 2022","Died from delivery cost per order; viable now as group orders for apartment societies."]}
+};
+const panel=document.getElementById("mode-panel");
+function esc(s){return s.replace(/[&<>]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[ch]))}
+function setMode(k){
+  const m=MODES[k];
+  panel.style.setProperty("--c",m.c);
+  panel.setAttribute("aria-labelledby","tab-"+k);
+  panel.innerHTML=`
+    <div class="mode-top"><div style="display:grid;gap:4px"><h3>${m.name}</h3><p class="says">${m.says}</p></div>
+      <div class="verdicts" aria-label="Possible verdicts">${m.verdicts.map(([t,c])=>`<span class="vpill" style="color:${c}">${t}</span>`).join("")}</div></div>
+    <dl class="mode-grid">
+      <div class="kv"><dt>Core question</dt><dd><b>${esc(m.q)}</b></dd></div>
+      <div class="kv"><dt>Agents Gemma might create</dt><dd>${esc(m.agents)}</dd></div>
+      <div class="kv"><dt>Fixed questions cover</dt><dd>${esc(m.core)}</dd></div>
+      <div class="kv"><dt>Adaptive follow-ups dig for</dt><dd>${esc(m.adaptive)}</dd></div>
+      <div class="kv"><dt>Devil's advocate asks</dt><dd class="attack">${esc(m.attack)}</dd></div>
+      <div class="kv signature"><dt>Signature section · ${esc(m.sig)}</dt><dd>${esc(m.sigText)}</dd></div>
+    </dl>
+    <p class="sample">Demo sample: <b>${esc(m.sample[0])}</b>. ${esc(m.sample[1])}</p>`;
+  document.querySelectorAll(".tab").forEach(t=>{const on=t.dataset.mode===k;t.setAttribute("aria-selected",on);t.tabIndex=on?0:-1});
+  document.querySelectorAll(".lifeline .pt").forEach(p=>p.setAttribute("aria-pressed",p.dataset.mode===k));
+}
+document.querySelectorAll(".tab").forEach(t=>{
+  t.addEventListener("click",()=>setMode(t.dataset.mode));
+  t.addEventListener("keydown",e=>{
+    const keys=Object.keys(MODES),i=keys.indexOf(t.dataset.mode);
+    if(e.key==="ArrowRight"||e.key==="ArrowLeft"){e.preventDefault();const n=keys[(i+(e.key==="ArrowRight"?1:3))%4];setMode(n);document.getElementById("tab-"+n).focus();}
+  });
+});
+document.querySelectorAll(".lifeline .pt").forEach(p=>p.addEventListener("click",()=>setMode(p.dataset.mode)));
+setMode("rescue");
+
+const TEAMS={
+  tiffin:{why:"Food business + students + Pune → I need logistics, pricing, local competition and food-safety rules.",a:[["Local Food Market Analyst","Market"],["Delivery Logistics Expert","Costs"],["Student Pricing Analyst","Pricing"],["FSSAI Compliance Checker","Compliance"]]},
+  bnpl:{why:"Lending + young users + India → credit risk and RBI rules come first, then competitors and unit economics.",a:[["Credit Risk Analyst","Risk"],["RBI Lending Compliance Officer","Compliance"],["Fintech Competitor Scout","Competitors"],["Unit Economics Modeller","ROI"]]},
+  gym:{why:"Physical locations + capex-heavy + smaller cities → location, local demand and break-even planning.",a:[["Real Estate & Location Scout","Location"],["Fitness Market Analyst","Market"],["Capex & Break-even Planner","Investment"]]},
+  phone:{why:"Offline phone retail + fewer walk-ins + new competitor + mid-range segment → I need these four.",a:[["Local Retail Competition Scout","Competitors"],["Online Channel Analyst","Market shift"],["Financing & EMI Analyst","Pricing"],["Sales Data Investigator","Your numbers"]]}
+};
+function setPitch(k){
+  document.querySelectorAll(".pbtn").forEach(b=>b.setAttribute("aria-pressed",b.dataset.pitch===k));
+  document.getElementById("reason").textContent="Gemma: “"+TEAMS[k].why+"”";
+  document.getElementById("agents").innerHTML=TEAMS[k].a.map(([n,r],i)=>`<div class="agent" style="animation-delay:${i*90}ms"><span>${r}</span><b>${n}</b></div>`).join("");
+}
+document.querySelectorAll(".pbtn").forEach(b=>b.addEventListener("click",()=>setPitch(b.dataset.pitch)));
+setPitch("tiffin");
+
+/* ROI: same formulas as demo-spec.md */
+const FIXED={startup:800000,varCost:1700,growth:0.04,cac:1200};
+function project(a,gMul){
+  const g=a.growth*gMul;let c=0,cum=-a.startup,be=null,peak=cum;const out=[cum];
+  for(let m=1;m<=24;m++){c=c*(1+g)*(1-a.churn)+a.newPer;cum+=c*(a.price-a.varCost)-a.fixed;out.push(cum);if(cum<peak)peak=cum;if(be===null&&cum>=0)be=m;}
+  return{out,be,roi:out[24]/a.startup,peak};
+}
+const inr=n=>"₹"+Math.round(n).toLocaleString("en-IN");
+const lakh=n=>(n/1e5).toFixed(1).replace(/\.0$/,"")+"L";
+function render(){
+  const a={...FIXED,price:+s("price").value,newPer:+s("new").value,churn:+s("churn").value/100,fixed:+s("fixed").value};
+  o("price").textContent=inr(a.price);o("new").textContent=a.newPer;o("churn").textContent=Math.round(a.churn*100)+"%";o("fixed").textContent="₹"+lakh(a.fixed);
+  const sc=[["var(--bad)",project(a,.5)],["var(--ink)",project(a,1)],["var(--good)",project(a,1.5)]];
+  const base=sc[1][1];
+  const ltv=(a.price-a.varCost)/a.churn/a.cac;
+  document.getElementById("k-be").textContent=base.be?("Month "+base.be):"Not in 24 mo";
+  document.getElementById("k-roi").textContent=Math.round(base.roi*100)+"%";
+  const kl=document.getElementById("k-ltv");kl.textContent=ltv.toFixed(1)+"×";kl.style.color=ltv>=3?"var(--good)":ltv>=1?"var(--warn)":"var(--bad)";
+  document.getElementById("k-peak").textContent="₹"+lakh(-base.peak);
+  const v=document.getElementById("verdict");
+  const [label,cls]=base.be&&base.be<=18?["GO","v-good"]:base.be?["PIVOT","v-warn"]:["NO-GO","v-bad"];
+  v.textContent=label;v.className="verdict "+cls;
+  drawChart(sc,base.be);
+}
+function drawChart(sc,be){
+  const W=600,H=260,L=48,R=14,T=14,B=30;
+  const all=sc.flatMap(x=>x[1].out);let lo=Math.min(...all,0),hi=Math.max(...all,0);
+  const step=niceStep((hi-lo)/5);lo=Math.floor(lo/step)*step;hi=Math.ceil(hi/step)*step;
+  const X=m=>L+(W-L-R)*m/24,Y=v=>T+(H-T-B)*(hi-v)/(hi-lo);
+  let g="";
+  for(let v=lo;v<=hi+1;v+=step){g+=`<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${(v/1e5).toFixed(0)}</text>`;}
+  for(const m of [0,6,12,18,24])g+=`<text x="${X(m)}" y="${H-10}" text-anchor="middle">${m===0?"mo 0":m}</text>`;
+  g+=`<line class="zero" x1="${L}" x2="${W-R}" y1="${Y(0)}" y2="${Y(0)}"/>`;
+  for(const [col,r] of sc){g+=`<polyline fill="none" stroke="${col}" stroke-width="${col==="var(--ink)"?2.6:1.8}" stroke-linejoin="round" points="${r.out.map((v,m)=>X(m).toFixed(1)+","+Y(v).toFixed(1)).join(" ")}"/>`;}
+  if(be){g+=`<circle cx="${X(be)}" cy="${Y(0)}" r="5" fill="var(--accent)"/><text x="${Math.min(X(be),W-R-60)}" y="${Y(0)-10}" text-anchor="middle" style="fill:var(--accent);font-weight:500">break-even</text>`;}
+  document.getElementById("chart").innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative profit over 24 months for three scenarios">${g}</svg>`;
+}
+function niceStep(x){const p=Math.pow(10,Math.floor(Math.log10(x)));const f=x/p;return (f<=1?1:f<=2?2:f<=5?5:10)*p;}
+const s=id=>document.getElementById("s-"+id),o=id=>document.getElementById("o-"+id);
+["price","new","churn","fixed"].forEach(id=>s(id).addEventListener("input",render));
+render();
+</script>
