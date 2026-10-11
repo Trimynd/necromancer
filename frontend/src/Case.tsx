@@ -4,7 +4,7 @@ import { Courtroom } from './Courtroom'
 import { Md, Report } from './Report'
 import { TestimonyCard, TestimonyPanel } from './Ghost'
 import {
-  cacheEvents, DOC_ICON, docLabel, mockInterrupted, planMd, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, parseVerdict, patchRecent,
+  cacheEvents, dataUpdateLabel, DOC_ICON, docLabel, mockInterrupted, planMd, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, over, parseVerdict, patchRecent, refreshData, refreshQuestion,
   reduce, reduceAll, rootOf, saveRecent, startCase, sumSources, threadFromRecent, verdictText,
   type CaseState, type Recorded, type ThreadItem,
 } from './lib'
@@ -19,7 +19,7 @@ const Numbers = lazy(() => loadDashboard().then((m) => ({ default: m.Numbers }))
 
 const EVENTS = [
   'status', 'documents', 'scores', 'plan', 'route', 'research', 'startup_data', 'manifest', 'pre_research', 'tool_call', 'agent_output', 'ghost_retry',
-  'ghost_dropped', 'window', 'rulings', 'report_chunk', 'verdict', 'summary', 'usage', 'call_log', 'error',
+  'ghost_dropped', 'window', 'data_changed', 'rulings', 'report_chunk', 'verdict', 'summary', 'usage', 'call_log', 'error',
 ]
 
 type Action =
@@ -34,7 +34,6 @@ const reducer = (s: CaseState, a: Action): CaseState => {
   if (a.event === 'patch') return { ...s, ...(a.data as Partial<CaseState>) }
   return reduce(s, a.event, a.data)
 }
-const over = (st?: string) => st === 'done' || st === 'error' || st === 'interrupted'
 
 type Meta = { parent_id?: string | null; thread: ThreadItem[] }
 
@@ -64,18 +63,30 @@ function useCaseStream(id: string) {
         rec.push({ event, data })
         dispatch({ event, data })
         if (event === 'status' && over(data as string)) { cacheEvents(id, data as string, rec); setConn('closed') }
-      }, { url: recent?.url, sheet: recent?.document_ids?.includes(MOCK_SHEET.id), interrupted: mockInterrupted() })
+      }, { url: recent?.url, sheet: recent?.document_ids?.includes(MOCK_SHEET.id), interrupted: mockInterrupted(), dataUpdate: !!dataUpdateLabel(recent?.text) })
     }
     let es: EventSource | undefined
     let poll: ReturnType<typeof setInterval> | undefined
     let dead = false
-    // Write what's known so far to the local cache: on every status change and at most every 5 s otherwise.
+    // `rec` mirrors what the state was built from (listened-to events only, in server order). `known` = the state
+    // holds exactly `rec`, so a (re)connect, which replays the whole run, skips what we already have instead of
+    // resetting the page.
     let rec: Recorded[] = []
+    let known = false
+    let status = cached?.status ?? 'pending'
     let savedAt = 0
-    const save = (status: string, force: boolean) => {
+    // Write what's known so far to the local cache: on every status change and at most every 5 s otherwise.
+    const save = (force: boolean) => {
       if (!force && Date.now() - savedAt < 5000) return
       savedAt = Date.now()
       cacheEvents(id, status, rec)
+    }
+    const replay = (r: { status: string; events: Recorded[] }) => {
+      dispatch({ event: 'replay', data: r.events })
+      cacheEvents(id, r.status, r.events)
+      rec = r.events.filter((e) => EVENTS.includes(e.event))
+      known = true
+      status = r.status
     }
 
     const snapshot = async () => {
@@ -84,38 +95,47 @@ function useCaseStream(id: string) {
       if (!res.ok) throw new Error(String(res.status))
       return res.json()
     }
+    // Last resort after the stream failed 4 times: poll the recorded events until the run ends (or vanishes).
     const pollUntilDone = () => {
       poll = setInterval(async () => {
         try {
-          const snap = await snapshot()
-          if (dead || !snap) return
-          dispatch({ event: 'load', data: { ...fromSnapshot(snap), text: snap.problem_statement || recent?.text, url: snap.input_url ?? recent?.url } })
-          if (over(snap.status)) { clearInterval(poll); setConn('closed') }
-        } catch { /* keep polling */ }
+          const r = await fetchEvents(id)
+          if (dead) return
+          if (!r) { clearInterval(poll); setConn(cached ? 'saved' : 'missing'); return }
+          replay(r)
+          if (over(r.status)) { clearInterval(poll); setConn('closed') }
+        } catch { /* server down: keep polling */ }
       }, 3000)
     }
-    // Pull the complete record of a finished run (usage/call_log land after the final status) and cache it.
+    // Pull the complete record of a finished run (anything that landed after the final status) and cache it.
     const settle = async () => {
       try {
         const r = await fetchEvents(id)
-        if (dead) return
-        if (r && over(r.status)) { dispatch({ event: 'replay', data: r.events }); cacheEvents(id, r.status, r.events) }
-        else if (!r) { const snap = await snapshot(); if (!dead && snap?.usage) dispatch({ event: 'usage', data: snap.usage }) }
+        if (!dead && r && over(r.status)) replay(r)
       } catch { /* keep what we have */ }
     }
     const open = (retries: number) => {
       es = new EventSource(`/api/stream/${id}`)
-      // The server replays the whole session on connect, so start from a clean slate each time.
-      es.onopen = () => { dispatch({ event: 'reset', data: null }); rec = []; setConn('live') }
+      let skip = 0
+      es.onopen = () => {
+        setConn('live')
+        if (known) skip = rec.length
+        else { dispatch({ event: 'reset', data: null }); rec = []; known = true }
+      }
       for (const name of EVENTS) {
         es.addEventListener(name, (e) => {
           let data: unknown = (e as MessageEvent).data
           try { data = JSON.parse(data as string) } catch { /* plain string */ }
+          const final = name === 'status' && over(data as string)
+          // Already applied (the server replays from the start). A final status always applies: a restarted
+          // server may have saved fewer events than we saw, then appends "interrupted".
+          if (skip > 0 && !final) { skip--; return }
+          skip = 0
           dispatch({ event: name, data })
           rec.push({ event: name, data })
-          const st = [...rec].reverse().find((x) => x.event === 'status')?.data as string | undefined
-          save(st ?? 'pending', name === 'status')
-          if (name === 'status' && over(data as string)) {
+          if (name === 'status') status = data as string
+          save(name === 'status')
+          if (final) {
             es?.close()
             setConn('closed')
             setTimeout(settle, 1500)
@@ -157,8 +177,7 @@ function useCaseStream(id: string) {
       .then((r) => {
         if (dead) return
         if (!r) return legacy()
-        dispatch({ event: 'replay', data: r.events })
-        cacheEvents(id, r.status, r.events)
+        replay(r)
         if (over(r.status)) setConn('closed')
         else open(3)
       })
@@ -213,22 +232,6 @@ function Rail({ s, simple }: { s: CaseState; simple: boolean }) {
   )
 }
 
-function Elapsed({ running }: { running: boolean }) {
-  const start = useRef(Date.now())
-  const [, tick] = useState(0)
-  const [end, setEnd] = useState<number>()
-  const ran = useRef(false)
-  if (running) ran.current = true
-  useEffect(() => {
-    if (!running) { setEnd((e) => e ?? Date.now()); return }
-    const t = setInterval(() => tick((n) => n + 1), 1000)
-    return () => clearInterval(t)
-  }, [running])
-  if (!ran.current || running) return null // live runs show the timer in the step list
-  const sec = Math.round(((end ?? Date.now()) - start.current) / 1000)
-  return <span>Finished in {Math.floor(sec / 60)}:{String(sec % 60).padStart(2, '0')}</span>
-}
-
 // One component instance per case, so refs (timers, scroll-once) and the instant first render reset on navigation.
 export function CasePage() {
   const { id } = useParams()
@@ -246,7 +249,6 @@ function CaseView() {
   // Fetch the charts chunk now, so it's ready by the time scores arrive.
   useEffect(() => { loadDashboard().catch(() => {}) }, [])
   const [since] = useState(() => loadRecent().find((r) => r.id === id)?.at ?? Date.now())
-  const t0 = useRef(Date.now())
   const ranLive = useRef(false)
   const [t1, setT1] = useState<number>()
   const [retrying, setRetrying] = useState(false)
@@ -260,7 +262,8 @@ function CaseView() {
   const assumption = s.report.match(/\*\*Assumption:?\*\*:?\s*([^\n]+)/i)?.[1]
   if (!finished && s.status !== 'pending') ranLive.current = true
   useEffect(() => { if (finished) setT1((t) => t ?? Date.now()) }, [finished])
-  const seconds = ranLive.current ? Math.round(((t1 ?? Date.now()) - t0.current) / 1000) : undefined
+  // Recorded run length when we have it; else from when this browser started the case (survives a reload).
+  const seconds = !finished ? undefined : s.duration ?? (ranLive.current && t1 ? Math.round((t1 - since) / 1000) : undefined)
 
   // Glide to the verdict once, when it arrives live (never on reduced motion or a revisited case).
   const scrolled = useRef(false)
@@ -488,10 +491,10 @@ ${planMd(s.plan)}
             </section>
           )}
 
-          {finished && (s.text || s.report) && <FollowUpBox id={id} family={v?.family} />}
+          {finished && (s.text || s.report) && <FollowUpBox id={id} family={v?.family} suggested={s.plan?.suggested_followups} />}
 
           <footer className="entry flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
-            <Elapsed running={!finished && conn === 'live'} />
+            {seconds != null && <span>Finished in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</span>}
             {!!calls && <span>{calls} model calls</span>}
             {!!tokens && <span>{tokens.toLocaleString()} tokens</span>}
             <span>Status: {s.status.replace('_', ' ')}</span>

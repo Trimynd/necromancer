@@ -37,12 +37,27 @@ export interface Ghost {
   roundSearches?: string[][]
   persona?: string
 }
-export interface ColStat { first: number; last: number; min: number; max: number; change_pct: number | null; trend: 'up' | 'down' | 'flat' }
+export interface ColStat {
+  first: number; last: number; min: number; max: number; change_pct: number | null; trend: 'up' | 'down' | 'flat'
+  /** Over the last 3 rows only. */
+  recent_change_pct?: number | null; recent_trend?: 'up' | 'down' | 'flat'
+}
 export interface Table { columns: string[]; rows: (string | number)[][] }
 export interface Doc {
   id: string; name: string; kind: string; chars?: number; pages?: number | null; preview?: string
   /** csv / sheet only: the parsed table (≤ 200 rows, header excluded) and per-numeric-column stats. */
   table?: Table; stats?: Record<string, ColStat>
+  /** sheet only: the link it was read from, and 1, 2, 3… each time it is re-read after an edit. */
+  source?: string; version?: number
+}
+/** One column's before/after in a `data_changed` event. */
+export interface ColChange {
+  column: string; before: number | null; after: number | null; change_pct: number | null
+  trend_before?: ColStat['trend']; trend_after?: ColStat['trend']
+}
+export interface SheetChange {
+  name: string; version_before: number; version_after: number; columns: ColChange[]
+  added_columns: string[]; removed_columns: string[]; rows_before: number; rows_after: number; changed: boolean
 }
 /** Same shape the backend sends: stats for every column whose cells are all numbers. */
 export function statsOf(t: Table): Record<string, ColStat> {
@@ -51,10 +66,12 @@ export function statsOf(t: Table): Record<string, ColStat> {
     const raw = t.rows.map((r) => r[i]).filter((v) => v !== '' && v != null)
     const xs = raw.map((v) => (typeof v === 'number' ? v : Number(String(v).replace(/[,₹$%\s]/g, ''))))
     if (!xs.length || xs.some((x) => !Number.isFinite(x))) return
-    const first = xs[0], last = xs[xs.length - 1]
-    const change_pct = first ? Math.round(((last - first) / Math.abs(first)) * 1000) / 10 : null
-    out[c] = { first, last, min: Math.min(...xs), max: Math.max(...xs), change_pct,
-      trend: change_pct == null || Math.abs(change_pct) < 1 ? 'flat' : change_pct > 0 ? 'up' : 'down' }
+    const first = xs[0], last = xs[xs.length - 1], r0 = xs[Math.max(0, xs.length - 3)]
+    const pct = (a: number) => (a ? Math.round(((last - a) / Math.abs(a)) * 1000) / 10 : null)
+    const trend = (p: number | null) => (p == null || Math.abs(p) < 1 ? 'flat' : p > 0 ? 'up' : 'down') as ColStat['trend']
+    const change_pct = pct(first), recent_change_pct = pct(r0)
+    out[c] = { first, last, min: Math.min(...xs), max: Math.max(...xs), change_pct, trend: trend(change_pct),
+      recent_change_pct, recent_trend: trend(recent_change_pct) }
   })
   return out
 }
@@ -74,6 +91,8 @@ export interface Plan {
   phases?: { name?: string; start_week?: number; end_week?: number }[]
   tasks?: PlanTask[]
   review?: { strengths?: string[]; risks?: string[]; stop_doing?: string[] }
+  /** Three questions specific to this case, for the follow-up box. */
+  suggested_followups?: string[]
 }
 export type Stage = 'launch' | 'grow' | 'rescue' | 'revive'
 export interface Usage { [model: string]: { calls?: number; input?: number; output?: number; thinking?: number } }
@@ -96,6 +115,10 @@ export interface CaseState {
   documents?: Doc[]
   scores?: Scores
   plan?: Plan
+  /** Re-analysis after the user edited their Google Sheet: what changed, per sheet. */
+  dataChanged?: SheetChange[]
+  /** Run length in seconds, from the recorded event times (finished runs only). */
+  duration?: number
   error?: string
 }
 
@@ -212,6 +235,8 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
       }
       return next
     }
+    case 'data_changed':
+      return { ...s, dataChanged: d?.sheets ?? [] }
     case 'documents':
       return { ...s, documents: d?.items ?? d }
     case 'scores':
@@ -395,6 +420,23 @@ export async function followUp(id: string, body: { question: string; depth: stri
   return (await res.json()).session_id
 }
 
+/** POST /api/session/:id/refresh-data -> the new turn's id. Throws with `status` 409 when the sheet is unchanged. */
+export async function refreshData(id: string, body: { depth: string; strict?: boolean }): Promise<string> {
+  if (isMock() || id.startsWith('mock-')) return 'mock-' + Date.now().toString(36)
+  const res = await fetch(`/api/session/${id}/refresh-data`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ depth: body.depth, strict: !!body.strict }),
+  })
+  if (!res.ok) {
+    let detail: unknown = `Couldn't re-read the sheet (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw Object.assign(new Error(typeof detail === 'string' ? detail : JSON.stringify(detail)), { status: res.status })
+  }
+  return (await res.json()).session_id
+}
+/** The backend words a refresh turn "My numbers were updated (version N)…": show it as "Data update vN". */
+export const dataUpdateLabel = (q?: string | null) => q?.match(/^My numbers were updated \(version (\d+)\)/)?.[1]
+export const refreshQuestion = (v: number) => `My numbers were updated (version ${v}). What changed, does it change the verdict, and what should I do now?`
+
 // ---- conversation thread ----
 export interface ThreadItem { session_id: string; question?: string; verdict?: string | null; status?: string }
 /** Mock mode has no server: rebuild the ancestor chain from recent cases. */
@@ -412,8 +454,13 @@ export function threadFromRecent(id: string): ThreadItem[] {
 export const rootOf = (id: string) => loadRecent().find((r) => r.id === id)?.root ?? id
 
 // ---- recorded event lists ----
-export interface Recorded { event: string; data: unknown }
-export const reduceAll = (events: Recorded[], base: CaseState) => events.reduce((s, e) => reduce(s, e.event, e.data), base)
+export interface Recorded { event: string; data: unknown; t?: number }
+export const reduceAll = (events: Recorded[], base: CaseState) => {
+  const s = events.reduce((st, e) => reduce(st, e.event, e.data), base)
+  const t = events[events.length - 1]?.t
+  return t != null && over(s.status) ? { ...s, duration: Math.round(t) } : s
+}
+export const over = (st?: string) => st === 'done' || st === 'error' || st === 'interrupted'
 
 const EV_KEY = 'case-events'
 const EV_MAX = 10

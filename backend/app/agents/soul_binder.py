@@ -110,7 +110,9 @@ Respond with STRICT JSON only:
               "end_week": 2, "owner": "who does it (Founder / Ops / Marketing ...)", "why": "one plain sentence",
               "success_metric": "how they'll know it worked", "depends_on": []}}],
   "review": {{"strengths": ["2-4 things working for them"], "risks": ["2-4 things that could hurt them"],
-              "stop_doing": ["1-3 things to stop"]}}}}
+              "stop_doing": ["1-3 things to stop"]}},
+  "suggested_followups": ["3 short questions THIS owner would naturally ask next about THIS case
+                          (e.g. about a specific competitor, cost, risk or step named above); never ask for a 90-day plan"]}}
 3 phases, 6-10 tasks, weeks between 1 and 13, end_week >= start_week.
 No abbreviations or business jargon (write "cost of one meal", not COGS; "first simple version of the app", not MVP)."""
 
@@ -237,7 +239,8 @@ def _clean_plan(raw: dict) -> dict:
     return {"horizon_days": 90, "goal": str(raw.get("goal", "")),
             "first_step_this_week": str(raw.get("first_step_this_week", "")),
             "phases": phases, "tasks": tasks,
-            "review": {k: [str(x) for x in review.get(k) or []] for k in ("strengths", "risks", "stop_doing")}}
+            "review": {k: [str(x) for x in review.get(k) or []] for k in ("strengths", "risks", "stop_doing")},
+            "suggested_followups": [str(q) for q in raw.get("suggested_followups") or [] if str(q).strip()][:3]}
 
 
 def _fmt(cases: dict[str, dict]) -> str:

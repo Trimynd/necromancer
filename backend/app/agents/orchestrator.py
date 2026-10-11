@@ -224,6 +224,10 @@ class Orchestrator:
         if session.prior_context:
             # Follow-up turn: the council starts from what the earlier case concluded.
             extra_context = {**(extra_context or {}), "earlier_in_this_conversation": session.prior_context}
+        if session.data_diff:
+            # The owner's numbers changed since the last verdict: say what moved (exact, from code).
+            await self.blackboard.emit(sid, "data_changed", {"sheets": session.data_diff})
+            extra_context = {**(extra_context or {}), "numbers_changed_since_last_verdict": session.data_diff}
         session.route = route.model_dump()
         await self.blackboard.emit(sid, "route", session.route)
 
@@ -366,7 +370,7 @@ class Orchestrator:
         session.summary = "".join(parts)
         # Listing + alive/dead status of every competitor comes from code (Yahoo Finance, Google News),
         # never from the model: it had called ZestMoney (shut Dec 2023) an active competitor.
-        extra = companies_markdown(await verify_companies(session.summary))
+        extra = companies_markdown(await verify_companies(session.summary, question))
         if extra:
             session.summary += extra
             await self.blackboard.emit(sid, "report_chunk", extra)

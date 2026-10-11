@@ -33,6 +33,20 @@ export function Thread({ items, search }: { items: ThreadItem[]; search: string 
   )
 }
 
+// Sub-progress inside the two long steps, so a 40-60 s phase never looks frozen.
+function courtLabel(s: CaseState) {
+  const n = s.ghosts.filter((g) => g.phase !== 'dropped').length
+  const testified = s.ghosts.filter((g) => g.cases.length).length
+  if (s.status !== 'in_court' || !n) return 'The ghosts testify; the Soul Binder rules'
+  if (s.attempt >= 0) return 'The Soul Binder has ruled; closing the court…'
+  return testified < n ? `The ghosts testify (${testified} of ${n} cases in)…` : 'The Soul Binder is cross-examining the cases…'
+}
+function writingLabel(s: CaseState) {
+  if (s.status !== 'summarizing') return 'Writing the verdict…'
+  const secs = (s.report.match(/^## /gm) ?? []).length
+  return s.report ? `Verdict in. Writing the full report (${secs} section${secs === 1 ? '' : 's'} so far)…` : 'Scoring the case and drafting your plan…'
+}
+
 const ORDER = ['pending', 'routing', 'scraping', 'researching', 'role_making', 'in_court', 'summarizing', 'done']
 
 /** Something useful within a second: elapsed time, the step we're on, and the router's searches as they arrive. */
@@ -58,9 +72,9 @@ export function LiveSteps({ s, since }: { s: CaseState; since: number }) {
       ? []
       : ([
           [s.ghosts.length ? `Summoned ${s.ghosts.length} ghosts` : 'Summoning the council…', s.ghosts.length > 0],
-          ['The ghosts testify; the Soul Binder rules', at > 5],
+          [courtLabel(s), at > 5],
         ] as [string, boolean][])),
-    [simple ? 'Writing the answer…' : 'Writing the verdict…', at > 6],
+    [simple ? 'Writing the answer…' : writingLabel(s), at > 6],
   ]
   const now = steps.findIndex(([, done]) => !done)
   const sec = Math.max(0, Math.round((Date.now() - since) / 1000))
@@ -85,17 +99,17 @@ export function LiveSteps({ s, since }: { s: CaseState; since: number }) {
 }
 
 /** Ask a follow-up: a new case that continues this one (the backend briefs its council on this verdict). */
-export function FollowUpBox({ id, family }: { id: string; family?: string }) {
+export function FollowUpBox({ id, family, suggested }: { id: string; family?: string; suggested?: string[] }) {
   const nav = useNavigate()
   const old = loadRecent().find((r) => r.id === id)
   const [q, setQ] = useState('')
   const [depth, setDepth] = useState<'fast' | 'deep'>(old?.depth === 'deep' ? 'deep' : 'fast')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const ideas = [
+  // Case-specific questions from the plan; generic ones only for runs that have none.
+  const ideas = suggested?.filter(Boolean).length ? suggested.filter(Boolean).slice(0, 3) : [
     family === 'go' ? 'What could still kill this?' : 'What would it take to make this a GO?',
     'Compare the top 2 competitors in detail',
-    'Give me a 90-day plan',
   ]
   const t = q.trim()
   const send = async (e?: React.FormEvent) => {

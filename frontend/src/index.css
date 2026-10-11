@@ -98,13 +98,16 @@ a:hover .logo-box { border-color: var(--seal); box-shadow: 0 0 12px color-mix(in
 .caret::after { content: "▍"; color: var(--seal); animation: blink 1s steps(2) infinite; }
 
 /* ---------- courtroom ---------- */
-.stage { position: relative; min-height: max(45vh, 470px); overflow: hidden; }
-.stage-caption { position: absolute; left: 0; right: 0; top: .75rem; text-align: center; }
-.seal-wrap { position: absolute; left: 50%; top: 62%; transform: translate(-50%, -48px); display: flex; flex-direction: column; align-items: center; z-index: 2; }
+/* Flow layout, never absolute: the ghosts wrap in rows above, the seal and the verdict sit in their own row below,
+   so nothing can overlap at any ghost count or width. */
+.stage { position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; gap: 1.5rem; padding: 1rem 1rem 1.5rem; }
+.stage-caption { text-align: center; }
+.seal-wrap { position: relative; display: flex; flex-direction: column; align-items: center; z-index: 2; }
+.ghost-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 1.25rem 1rem; width: 100%; }
 .seal { width: 96px; height: 96px; color: var(--seal); filter: drop-shadow(0 2px 3px rgb(0 0 0 / .2)); }
 .seal.busy { animation: seal-pulse 1.6s ease-in-out infinite; }
 .seal.stamp { animation: stamp 250ms ease-out both; }
-.ghost { position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -30px); width: 150px; text-align: center; z-index: 3;
+.ghost { position: relative; width: 150px; min-width: 0; text-align: center; z-index: 3;
   animation: rise .6s ease-out both; animation-delay: var(--d); }
 .avatar-wrap { position: relative; width: 60px; height: 60px; margin: 0 auto; }
 .avatar { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; letter-spacing: .02em;
@@ -128,12 +131,12 @@ a:hover .logo-box { border-color: var(--seal); box-shadow: 0 0 12px color-mix(in
 .scroll-token.back { border-color: var(--stop); }
 .beam { stroke: var(--seal); stroke-width: 1.5; stroke-dasharray: 4 8; opacity: .7; animation: flow .9s linear infinite; }
 
+/* Long moods ("uncompromisingly disciplined") wrap inside their own chip. */
+.ghost .chip { max-width: 100%; overflow-wrap: anywhere; }
 @media (max-width: 639px) {
-  .stage { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3.25rem .5rem 1.25rem; min-height: 0; }
-  .stage-caption { top: .75rem; padding: 0 1rem; }
-  .seal-wrap { position: static; transform: none; }
-  .ghost-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem .5rem; width: 100%; }
-  .ghost { position: relative; left: auto; top: auto; transform: none; width: auto; }
+  .stage { gap: 1rem; padding: 1rem .5rem 1.25rem; }
+  .ghost-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem .5rem; }
+  .ghost { width: auto; }
 }
 
 @keyframes rise { from { opacity: 0; translate: 0 18px; } to { opacity: 1; translate: 0 0; } }
@@ -240,5 +243,4 @@ mark.hl { background: color-mix(in srgb, var(--ghost) 26%, transparent); color: 
 .g-bar.phase { height: 8px; opacity: .45; cursor: default; }
 .g-row.on { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .g-row.on .g-name { background: color-mix(in srgb, var(--ink) 5%, var(--sheet)); }
-@media (min-width: 640px) { .stage.compact { min-height: 360px; } }
 @media print { .gantt-wrap { overflow: visible; } .gantt { min-width: 0; } .term-tip { display: none; } }

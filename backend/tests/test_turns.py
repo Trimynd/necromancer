@@ -47,3 +47,31 @@ def test_run_saved_mid_way_reopens_as_interrupted():
     assert c.get("/api/session/dead-run-1").json()["status"] == "interrupted"
     assert c.get("/api/session/dead-run-1/events").json()["status"] == "interrupted"
     assert 'data: "interrupted"' in c.get("/api/stream/dead-run-1").text
+
+
+def test_refresh_data_diffs_sheet_versions(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.services.documents import extract
+    v1 = {"id": "old1", "name": "Sales", "kind": "sheet", "source": "https://docs.google.com/spreadsheets/d/x",
+          "stats": {"revenue": {"last": 500.0, "trend": "down"}}, "table": {"rows": [[1], [2]]}}
+    history.save("parent-1", {"status": "done", "problem_statement": "q", "verdict": "PIVOT", "documents": [v1]}, [])
+    started = []
+    monkeypatch.setattr(problem_routes, "_start", lambda s: started.append(s) or problem_routes.ProblemResponse(
+        session_id=s.session_id, stream_url="", parent_id=s.parent_id))
+
+    async def sheet_v2(url):
+        return {**extract("Sales.csv", b"month,revenue\nJan,500\nFeb,750\nMar,900\n"), "kind": "sheet", "source": url}
+    monkeypatch.setattr(problem_routes, "read_sheet", sheet_v2)
+    c = TestClient(app)
+    r = c.post("/api/session/parent-1/refresh-data", json={"depth": "fast"})
+    assert r.status_code == 200, r.text
+    s = started[0]
+    assert s.parent_id == "parent-1" and s.documents[0]["version"] == 2 and "text" not in s.documents[0]
+    col = s.data_diff[0]["columns"][0]
+    assert (col["before"], col["after"], col["change_pct"], col["trend_after"]) == (500.0, 900.0, 80.0, "up")
+
+    async def sheet_same(url):
+        return {**v1, "id": "same", "text": "x"}
+    monkeypatch.setattr(problem_routes, "read_sheet", sheet_same)
+    assert c.post("/api/session/parent-1/refresh-data", json={}).status_code == 409

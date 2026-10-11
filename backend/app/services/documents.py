@@ -71,7 +71,12 @@ def table_and_stats(text: str) -> tuple[dict, dict]:
         first, last = nums[0], nums[-1]
         change = round((last - first) / abs(first) * 100, 1) if first else None
         trend = "flat" if change is None or abs(change) < 2 else ("up" if change > 0 else "down")
-        stats[col] = {"first": first, "last": last, "min": min(nums), "max": max(nums), "change_pct": change, "trend": trend}
+        # recent = the last 3 rows: catches a recovery that the first-vs-last trend hides
+        base = nums[-3] if len(nums) >= 3 else first
+        recent = round((last - base) / abs(base) * 100, 1) if base else None
+        recent_trend = "flat" if recent is None or abs(recent) < 2 else ("up" if recent > 0 else "down")
+        stats[col] = {"first": first, "last": last, "min": min(nums), "max": max(nums), "change_pct": change, "trend": trend,
+                      "recent_change_pct": recent, "recent_trend": recent_trend}
     # rows can be ragged (e.g. an unquoted "Rs 1,000" splits into two cells): keep it to the header's width
     typed = [[(_number(c) if header[i] in stats and _number(c) is not None else c) for i, c in enumerate(r[: len(header)])]
              for r in body]
@@ -122,6 +127,7 @@ def _stats_brief(stats: dict) -> str:
         return ""
     lines = [f"{c}: first {s['first']:g}, latest {s['last']:g}, min {s['min']:g}, max {s['max']:g}"
              + (f", change {s['change_pct']:+g}% ({s['trend']})" if s["change_pct"] is not None else "")
+             + (f", last 3 rows {s['recent_change_pct']:+g}% ({s['recent_trend']})" if s.get("recent_change_pct") is not None else "")
              for c, s in stats.items()]
     return "COMPUTED BY CODE (exact): " + "; ".join(lines) + "\n"
 

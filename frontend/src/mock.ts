@@ -1,4 +1,4 @@
-import { statsOf, type Doc } from './lib'
+import { statsOf, type Doc, type SheetChange } from './lib'
 
 // A recorded-style run (tiffin service, 3 ghosts, one sent back then accepted), replayed with delays.
 
@@ -17,6 +17,26 @@ export const MOCK_SHEET: Doc = {
   id: 'mock-sheet', name: 'Phone shop – monthly sales', kind: 'sheet', chars: 412, pages: null,
   table: SHEET_TABLE, stats: statsOf(SHEET_TABLE),
 }
+
+// "I updated my sheet": September came in and sales bounced back (version 2, one more row).
+const SHEET_V2_TABLE = { ...SHEET_TABLE, rows: [...SHEET_TABLE.rows, ['Sep 2026', 1350000, 1760, 767]] }
+export const MOCK_SHEET_V2: Doc = { ...MOCK_SHEET, version: 2, table: SHEET_V2_TABLE, stats: statsOf(SHEET_V2_TABLE) }
+/** Same shape as the backend's `data_changed` sheet entry, computed from the two versions. */
+const diff = (a: Doc, b: Doc): SheetChange => {
+  const sa = a.stats ?? {}, sb = b.stats ?? {}
+  const cols = Object.keys(sb).filter((c) => sa[c])
+  return {
+    name: b.name, version_before: a.version ?? 1, version_after: b.version ?? 2,
+    columns: cols.map((c) => ({
+      column: c, before: sa[c].last, after: sb[c].last,
+      change_pct: sa[c].last ? Math.round(((sb[c].last - sa[c].last) / Math.abs(sa[c].last)) * 1000) / 10 : null,
+      trend_before: sa[c].recent_trend, trend_after: sb[c].recent_trend,
+    })),
+    added_columns: Object.keys(sb).filter((c) => !sa[c]), removed_columns: Object.keys(sa).filter((c) => !sb[c]),
+    rows_before: a.table?.rows.length ?? 0, rows_after: b.table?.rows.length ?? 0, changed: true,
+  }
+}
+export const MOCK_DATA_CHANGED = { sheets: [diff(MOCK_SHEET, MOCK_SHEET_V2)] }
 
 const g = {
   arjun: { id: 'arjun', name: 'Arjun, the Budget Student' },
@@ -70,7 +90,8 @@ Demand is real, but ₹2500/month for two meals a day sits above what most hoste
 | Company | Listed | Market cap | Revenue (TTM) | Status signal |
 |---|---|---|---|---|
 | Swiggy | SWIGGY.NS (NSI) | 613.6B INR | 249.0B INR | ⚠️ [Swiggy shuts down a standalone quick-food app](https://news.google.com/) (19 Feb 2026) |
-| Zomato (Eternal) | ETERNAL.NS (NSI) | 2.1T INR | 202.4B INR | No shutdown news |
+| Zomato (Eternal) | ETERNAL.NS (NSI) | 2.1T INR | 202.4B INR | ✓ No shutdown news |
+⚠️ = a news headline mentions a shutdown or halt; check the link. ✓ = no shutdown news found.
 `
 
 const SCORES = {
@@ -124,6 +145,11 @@ const PLAN = {
     risks: ['Students leave during exams and holidays.', 'Mess food at ₹1800–2200 is cheaper than your plan.', 'Food quality can slip as you grow.'],
     stop_doing: ['Stop planning for 400 students by month 6. Aim for 120 first.', 'Don’t start with two meals a day.', 'Don’t rent a big kitchen before the pilot works.'],
   },
+  suggested_followups: [
+    'Would a ₹1500 lunch-only plan still break even at 120 students?',
+    'How do I stop students cancelling during exams and holidays?',
+    'Which Kothrud college should I pilot at first, and why?',
+  ],
 }
 
 const chunks = REPORT.match(/[\s\S]{1,60}/g) ?? []
@@ -216,9 +242,17 @@ const ALL: Ev[] = [
 ]
 
 /** Replays the mock run into `emit`. Returns a cancel function. */
-export function playMock(emit: (event: string, data: unknown) => void, opts: { url?: string; sheet?: boolean; interrupted?: boolean } = {}): () => void {
+export function playMock(
+  emit: (event: string, data: unknown) => void,
+  opts: { url?: string; sheet?: boolean; interrupted?: boolean; dataUpdate?: boolean } = {},
+): () => void {
   let base = ALL
-  if (opts.sheet) base = base.map((e): Ev => (e[1] === 'documents' ? [e[0], 'documents', { items: [...(e[2] as { items: Doc[] }).items, MOCK_SHEET] }] : e))
+  const sheet = opts.dataUpdate ? MOCK_SHEET_V2 : MOCK_SHEET
+  if (opts.sheet || opts.dataUpdate)
+    base = base.flatMap((e): Ev[] => e[1] !== 'documents' ? [e] : [
+      [e[0], 'documents', { items: [...(e[2] as { items: Doc[] }).items, sheet] }],
+      ...(opts.dataUpdate ? [[300, 'data_changed', MOCK_DATA_CHANGED] as Ev] : []),
+    ])
   // Server restarted mid-court: everything up to the first rulings, then status "interrupted".
   if (opts.interrupted) base = [...base.slice(0, base.findIndex((e) => e[1] === 'rulings') + 1), [1500, 'status', 'interrupted']]
   // With a website, the court reads it first (url + prompt are sent together).
