@@ -5,6 +5,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import Compare from '@/pages/compare';
 import { Header } from '@/components/layout/Header';
 import { FooterDock } from '@/components/layout/FooterDock';
 import { ScreenTitle } from '@/components/common/ScreenTitle';
@@ -982,6 +983,7 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
         <Route path="/" component={Home} />
+        <Route path="/compare" component={Compare} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>

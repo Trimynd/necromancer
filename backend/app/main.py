@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routes import companies, documents, health, problem, revive, stream
+from app.routes import companies, compare, documents, health, problem, revive, stream
 from app.services.deployer import STATIC_DIR
 
 app = FastAPI(title="Necromancer API", version="0.1.0")
@@ -22,5 +22,6 @@ app.include_router(problem.router)
 app.include_router(stream.router)
 app.include_router(companies.router)
 app.include_router(documents.router)
+app.include_router(compare.router)
 
 app.mount("/zombie", StaticFiles(directory=STATIC_DIR), name="zombie")

@@ -17,5 +17,9 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    proxy: {
+      // backend (FastAPI) on 8000; SSE streams pass through unbuffered
+      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+    },
   },
 });

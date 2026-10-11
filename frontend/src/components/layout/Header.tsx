@@ -1,5 +1,6 @@
 import React from 'react';
-import { Skull, AudioLines, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Skull, AudioLines, ArrowLeft, RotateCcw, GitCompareArrows } from 'lucide-react';
+import { Link } from 'wouter';
 import type { Screen } from '../../types/necromancer';
 
 interface HeaderProps {
@@ -38,6 +39,14 @@ export function Header({
       </button>
 
       <div className="flex items-center gap-2">
+        <Link
+          href="/compare"
+          data-testid="link-compare"
+          className="button-quiet flex items-center gap-1.5 px-3 py-1.5 text-[10px]"
+        >
+          <GitCompareArrows size={13} className="text-[#14b8a6]" />
+          <span>Compare Excel</span>
+        </Link>
         <button
           data-testid="button-audio-toggle"
           onClick={onToggleAmbient}

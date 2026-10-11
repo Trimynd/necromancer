@@ -1,0 +1,78 @@
+import io
+import sys
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+from openpyxl import Workbook
+
+from app.main import app
+from app.services.spreadsheets import parse_number
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import make_sample_excels  # noqa: E402
+
+client = TestClient(app)
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _xlsx(rows) -> bytes:
+    wb = Workbook()
+    for r in rows:
+        wb.active.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _post(*named):
+    return client.post("/api/compare", files=[("files", (n, d, XLSX)) for n, d in named])
+
+
+def test_parse_number_handles_money_formats():
+    assert parse_number("₹1,234 Cr") == 1234 and parse_number("(120)") == -120 and parse_number("12.5%") == 12.5
+    assert parse_number("Q1 FY24") is None and parse_number(None) is None
+
+
+def test_upload_xlsx_as_document():
+    data = _xlsx([["Month", "Revenue"], ["Jan", 100], ["Feb", 80]])
+    r = client.post("/api/documents", files={"files": ("sales.xlsx", data, XLSX)})
+    assert r.status_code == 200, r.text
+    assert r.json()["documents"][0]["kind"] == "excel"
+
+
+def test_same_layout_changed_values_shows_cells_and_verdict_change():
+    header = ["Period", "Revenue", "Expenses", "Net Profit"]
+    base = _xlsx([header, ["Q1", 100, 90, 10], ["Q2", 110, 95, 15], ["Q3", 125, 100, 25]])
+    worse = _xlsx([header, ["Q1", 100, 90, 10], ["Q2", 95, 110, -15], ["Q3", 90, 120, -30]])
+    r = _post(("base.xlsx", base), ("worse.xlsx", worse))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    diff = body["diffs"]["0-1"]
+    assert diff["cells"]["paired_by"] == "label"
+    changed = {(c["row"], c["column"]) for c in diff["cells"]["changes"]}
+    assert ("Q2", "Revenue") in changed and ("Q1", "Revenue") not in changed
+    a, b = (w["verdict"] for w in body["workbooks"])
+    assert b["overall"] < a["overall"] and diff["verdict"]["overall"]["delta"] < 0
+    assert diff["verdict"]["drivers"] and all(w["document_id"] for w in body["workbooks"])
+
+
+def test_sample_workbooks_compare(tmp_path):
+    paths = {p.stem: p.read_bytes() for p in make_sample_excels.main(tmp_path)}
+    r = _post(*((f"{k}.xlsx", paths[k]) for k in ("zomato_fy2023", "zomato_fy2024")))
+    assert r.status_code == 200, r.text
+    zomato = r.json()
+    assert zomato["diffs"]["0-1"]["cells"]["paired_by"] == "position"  # Q1 FY23 vs Q1 FY24
+    assert zomato["workbooks"][1]["verdict"]["overall"] > zomato["workbooks"][0]["verdict"]["overall"]
+    assert zomato["workbooks"][0]["financials"]["series"]["revenue"][0] == 1414
+
+    r = _post(*((f"{k}.xlsx", paths[k]) for k in ("nykaa_fy2025", "nykaa_fy2025_whatif")))
+    nykaa = r.json()
+    assert nykaa["workbooks"][1]["verdict"]["overall"] < nykaa["workbooks"][0]["verdict"]["overall"]
+
+
+def test_compare_needs_two_to_six_spreadsheets():
+    one = _xlsx([["Period", "Revenue"], ["Q1", 1]])
+    assert _post(("a.xlsx", one)).status_code == 400
+    assert _post(*((f"{i}.xlsx", one) for i in range(7))).status_code == 400
+    r = client.post("/api/compare", files=[("files", ("a.pdf", b"%PDF", "application/pdf"))] * 2)
+    assert r.status_code == 400

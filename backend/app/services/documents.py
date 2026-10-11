@@ -11,13 +11,15 @@ import uuid
 from docx import Document
 from pypdf import PdfReader
 
+from app.services.spreadsheets import SpreadsheetError, read_sheets, sheets_text
+
 MAX_FILES = 3
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PDF_PAGES = 10
 MAX_CHARS = 20_000  # per document, before it is chunked into evidence
 CSV_ROWS = 200
 
-KINDS = {".pdf": "pdf", ".csv": "csv", ".txt": "text", ".md": "text", ".docx": "docx"}
+KINDS = {".pdf": "pdf", ".csv": "csv", ".txt": "text", ".md": "text", ".docx": "docx", ".xlsx": "excel", ".xlsm": "excel"}
 
 
 class DocumentError(ValueError):
@@ -27,7 +29,7 @@ class DocumentError(ValueError):
 def _kind(name: str) -> str:
     ext = name[name.rfind("."):].lower() if "." in name else ""
     if ext not in KINDS:
-        raise DocumentError(f"{name}: unsupported file type (use PDF, CSV, TXT, MD or DOCX)")
+        raise DocumentError(f"{name}: unsupported file type (use PDF, CSV, XLSX, TXT, MD or DOCX)")
     return KINDS[ext]
 
 
@@ -68,13 +70,17 @@ def extract(name: str, data: bytes) -> dict:
             text = _csv(data)
         elif kind == "docx":
             text = _docx(data)
+        elif kind == "excel":
+            text = sheets_text(read_sheets(name, data))
         else:
             text = data.decode("utf-8", errors="replace")
     except DocumentError:
         raise
+    except SpreadsheetError as exc:
+        raise DocumentError(str(exc)) from exc
     except Exception as exc:
         raise DocumentError(f"{name}: could not be read ({type(exc).__name__})") from exc
-    text = " ".join(text.split()) if kind != "csv" else text.strip()
+    text = " ".join(text.split()) if kind not in ("csv", "excel") else text.strip()
     if not text:
         raise DocumentError(f"{name}: no readable text found (scanned PDF?)")
     text = text[:MAX_CHARS]
