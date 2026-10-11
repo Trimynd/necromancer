@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.agents.role_maker import RoleMakerAgent
+from app.agents.role_maker import RoleMakerAgent, RoleMakerError
 
 
 def _manifest_json(hub_agent="ghost_ceo", extra_agent_count=0):
@@ -70,9 +70,25 @@ async def test_generate_manifest_fixes_invalid_hub_agent():
     assert manifest.hub_agent in {a.id for a in manifest.agents}
 
 
+class _SequenceGemma:
+    def __init__(self, *texts):
+        self._texts = list(texts)
+        self.messages = []
+
+    async def generate(self, **kwargs):
+        self.messages.append(kwargs["user_message"])
+        return {"text": self._texts.pop(0), "function_calls": []}
+
+
 @pytest.mark.asyncio
-async def test_generate_manifest_falls_back_on_garbage():
-    role_maker = RoleMakerAgent(gemma=_FakeGemma("not json at all"))
-    manifest = await role_maker.generate_manifest("test problem")
-    assert manifest.hub_agent == "ghost_ceo"
-    assert len(manifest.agents) >= 1
+async def test_generate_manifest_retries_with_error_feedback():
+    gemma = _SequenceGemma("not json at all", _manifest_json())
+    manifest = await RoleMakerAgent(gemma=gemma).generate_manifest("test problem")
+    assert manifest.agents[0].id == "ghost_ceo"
+    assert "previous reply was invalid" in gemma.messages[1]
+
+
+@pytest.mark.asyncio
+async def test_generate_manifest_raises_instead_of_hardcoded_team():
+    with pytest.raises(RoleMakerError):
+        await RoleMakerAgent(gemma=_FakeGemma("not json at all")).generate_manifest("test problem")

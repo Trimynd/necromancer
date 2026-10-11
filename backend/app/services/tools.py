@@ -6,10 +6,24 @@ Keyed by name so agents can request a subset via `AgentConfig.tools`.
 TOOL_REGISTRY: dict[str, dict] = {
     "web_research": {
         "name": "web_research",
-        "description": "Search the public web (Wikipedia, Hacker News) for a query, store results in memory, return the best evidence.",
+        "description": (
+            "Search several public sources for a query, store results in memory, and return the best "
+            "evidence with a count per source. Pick the sources that fit your role."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"query": {"type": "string", "description": "What to research"}},
+            "properties": {
+                "query": {"type": "string", "description": "What to research"},
+                "sources": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": [
+                        "web", "news", "reddit", "hackernews", "wikipedia", "finance", "jobs", "reviews"]},
+                    "description": (
+                        "Defaults to web+news+reddit+hackernews+wikipedia. Add finance (listed-company numbers), "
+                        "jobs (hiring signals) or reviews (customer sentiment) when your role needs them."
+                    ),
+                },
+            },
             "required": ["query"],
         },
     },

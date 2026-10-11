@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Awaitable, Callable
 
 from app.services.deployer import deploy_zombie_site
@@ -10,6 +11,8 @@ from app.services.scraper import scrape
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+TOOL_TIMEOUT = 45  # seconds; a hung scrape must not freeze the whole court
 
 ToolHandler = Callable[..., Awaitable[dict]]
 
@@ -35,7 +38,10 @@ class ToolExecutor:
             return {"error": f"Unknown tool '{name}'"}
 
         try:
-            return await handler(**args)
+            return await asyncio.wait_for(handler(**args), TOOL_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("Tool %s timed out after %ss", name, TOOL_TIMEOUT)
+            return {"error": f"Tool '{name}' timed out"}
         except TypeError as exc:
             logger.warning("Bad arguments for tool %s: %s", name, exc)
             return {"error": f"Invalid arguments for '{name}': {exc}"}

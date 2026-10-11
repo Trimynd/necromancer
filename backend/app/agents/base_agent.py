@@ -1,4 +1,5 @@
 from app.models.manifest import AgentConfig
+from app.services import memory
 from app.services.blackboard import Blackboard
 from app.services.gemma_client import GemmaClient
 from app.services.tool_executor import ToolExecutor
@@ -6,6 +7,17 @@ from app.services.tools import TOOL_REGISTRY
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _compact(value, text_limit: int = 350):
+    """Shrink scraped text before it goes back into a prompt: the free tier's
+    tokens-per-minute quota, not request count, is what full pages blow through."""
+    if isinstance(value, dict):
+        return {k: (v[:text_limit] if k == "text" and isinstance(v, str) else _compact(v, text_limit))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_compact(v, text_limit) for v in value]
+    return value
 
 
 class BaseAgent:
@@ -26,27 +38,36 @@ class BaseAgent:
         self.gemma = gemma or GemmaClient()
         self.tool_executor = ToolExecutor()
         self.memory: list[dict] = []
+        # What this agent really searched in its last run (not what it claims it searched).
+        self.research_log: list[dict] = []
 
     async def run(self, task: str, context: dict | None = None) -> str:
         """Observe -> Think/Act (tool calls) -> Reflect, writing results to the blackboard."""
+        memory.evidence_tag.set({**memory.evidence_tag.get(), "agent_id": self.id})
         board_state = await self.blackboard.read_relevant(self.session_id, self.id)
         prompt = self._build_prompt(task, board_state, context)
 
+        tools = self._tool_schemas()
         response = await self.gemma.generate(
             system_prompt=self.system_prompt,
             user_message=prompt,
-            tools=self._tool_schemas(),
+            tools=tools,
             temperature=self.temperature,
+            # With minimal thinking the model happily skips research; ANY forces >=1 tool call.
+            tool_mode="ANY" if tools else "AUTO",
         )
 
         tool_results = []
+        self.research_log = []
         for call in response.get("function_calls", []):
             await self.blackboard.emit(self.session_id, "tool_call", {"agent_id": self.id, **call})
             result = await self.tool_executor.execute(call)
             tool_results.append({"call": call, "result": result})
+            self.research_log.append({"tool": call["name"], "query": call["args"].get("query"),
+                                      "per_source": result.get("per_source") if isinstance(result, dict) else None})
             await self.blackboard.write(self.session_id, self.id, f"tool:{call['name']}", result)
 
-        final = await self._reflect(response["text"], tool_results) if tool_results else response["text"]
+        final = await self._reflect(prompt, response["text"], tool_results) if tool_results else response["text"]
 
         self.memory.append({"task": task, "output": final})
         await self.blackboard.write(self.session_id, self.id, "output", final)
@@ -56,12 +77,13 @@ class BaseAgent:
 
         return final
 
-    async def _reflect(self, text: str, tool_results: list[dict]) -> str:
+    async def _reflect(self, prompt: str, text: str, tool_results: list[dict]) -> str:
         reflection_prompt = (
-            f"You drafted this response:\n{text}\n\n"
-            f"Tool results you gathered:\n{tool_results}\n\n"
-            "Revise it into a final answer that actually uses the tool results. "
-            "Drop any claim the tool results contradict. Reply with only the final answer."
+            f"{prompt}\n\n"
+            f"You drafted this response:\n{text or '(only tool calls)'}\n\n"
+            f"Tool results you gathered:\n{_compact(tool_results)}\n\n"
+            "Now write the final answer to the TASK above, in exactly the format it asks for, "
+            "using the tool results. Drop any claim the tool results contradict."
         )
         resp = await self.gemma.generate(
             system_prompt=self.system_prompt,

@@ -1,7 +1,7 @@
 import pytest
 
 from app.agents import orchestrator as orchestrator_module
-from app.agents.judge import Ruling
+from app.agents.soul_binder import Ruling
 from app.agents.orchestrator import Orchestrator, parse_case
 from app.agents.router import Route
 from app.models.manifest import AgentConfig, AgentManifest
@@ -19,16 +19,16 @@ class _FakeGhost:
         return f'{{"claim": "{self.id} claim v{len(self.contexts)}", "evidence": [], "confidence": 0.8, "emotion": "calm"}}'
 
 
-class _FakeJudge:
+class _FakeSoulBinder:
     def __init__(self):
         self.rule_calls = 0
 
-    async def rule(self, question, cases):
+    async def rule(self, question, cases, window=None):
         self.rule_calls += 1
         # send "weak" back once, then accept everything
         return {
             gid: Ruling(agent_id=gid, decision="retry" if gid == "weak" and self.rule_calls == 1 else "accept",
-                        guidance="search UPI fraud stats")
+                        guidance="search UPI fraud stats", needs_more="NPCI fraud report 2026", missing_sources=["news"])
             for gid in cases
         }
 
@@ -67,7 +67,7 @@ def court(monkeypatch):
 @pytest.mark.asyncio
 async def test_court_sends_back_weak_ghost_then_reaches_verdict(court):
     orch = Orchestrator(Blackboard())
-    orch.judge = _FakeJudge()
+    orch.soul_binder = _FakeSoulBinder()
     session = SessionState(session_id="s1", problem_statement="detect UPI fraud")
 
     result = await orch.solve_problem(session)
@@ -76,7 +76,9 @@ async def test_court_sends_back_weak_ghost_then_reaches_verdict(court):
     assert result.verdict == "VERDICT" and result.summary == "SUMMARY"
     assert len(court["strong"].contexts) == 1  # accepted first time
     assert len(court["weak"].contexts) == 2  # sent back once
-    assert court["weak"].contexts[1]["judge_guidance"] == "search UPI fraud stats"
+    assert court["weak"].contexts[1]["binder_guidance"] == "search UPI fraud stats"
+    assert court["weak"].contexts[1]["missing_sources"] == ["news"]
+    assert result.usage == {}  # fakes make no real API calls
     assert result.cases["weak"]["claim"] == "weak claim v2"
 
 
@@ -98,6 +100,12 @@ async def test_simple_question_skips_court(monkeypatch):
     assert result.status == SessionStatus.DONE
     assert result.manifest is None
     assert "UPI" in result.verdict
+
+
+def test_parse_case_counts_real_source_types():
+    case = parse_case('{"claim": "x", "evidence": [{"source_type": "News"}, {"source_type": "web"}, '
+                      '{"source_type": "news"}, {"source_type": "made-up"}]}')
+    assert case["source_types"] == ["news", "web"]
 
 
 def test_parse_case_handles_prose():

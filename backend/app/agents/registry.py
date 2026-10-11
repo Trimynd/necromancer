@@ -9,7 +9,7 @@ BASE_TOOLS = ["search_memory", "web_research"]
 
 class AgentFactory:
     """Spawns one ghost (BaseAgent) per role in the manifest, all on the fast
-    MoE model. The Judge (separate, see judge.py) gets the big model.
+    MoE model. The Soul Binder (separate, see soul_binder.py) gets the big model.
     """
 
     @staticmethod

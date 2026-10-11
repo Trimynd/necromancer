@@ -30,5 +30,6 @@ class SessionState(BaseModel):
     cases: dict[str, Any] | None = None
     verdict: str | None = None
     summary: str | None = None
+    usage: dict[str, Any] | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
