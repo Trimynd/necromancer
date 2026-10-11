@@ -21,3 +21,9 @@ backend/app/static/zombie/*.html
 Thumbs.db
 .vscode/
 .idea/
+
+# Personal scratch tests
+test/
+
+# Vector memory (Chroma)
+backend/data/
