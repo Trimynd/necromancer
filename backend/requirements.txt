@@ -14,6 +14,7 @@ numpy==2.4.6
 # multi-source search
 ddgs==9.16.0
 trafilatura==2.3.1
+lxml_html_clean  # trafilatura/justext need it; lxml 5.2+ split it out
 yfinance==1.7.0
 
 pytest==9.1.1
