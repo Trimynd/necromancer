@@ -26,7 +26,7 @@ class _FakeSoulBinder:
     def __init__(self):
         self.rule_calls = 0
 
-    async def rule(self, question, cases, window=None, think=True):
+    async def rule(self, question, cases, window=None, think=True, strict=False):
         self.rule_calls += 1
         # send "weak" back once, then accept everything
         return {
@@ -34,6 +34,9 @@ class _FakeSoulBinder:
                         guidance="search UPI fraud stats", needs_more="NPCI fraud report 2026", missing_sources=["news"])
             for gid in cases
         }
+
+    async def score(self, question, cases):
+        return {"label": "GO", "dimensions": {"Market demand": 8.0}, "overall": 80}
 
     async def report(self, question, cases):
         for chunk in ["## 1. Verdict\nGO 80", "\n## 2. Question\nctx"]:
@@ -89,11 +92,13 @@ async def test_court_sends_back_weak_ghost_then_reaches_verdict(court):
     assert court["weak"].contexts[1]["missing_sources"] == ["news"]
     # first case: evidence pre-gathered, one call, no tools; the sent-back redo may research again
     assert court["weak"].contexts[0]["your_research"][0]["text"] == "fact"
+    assert court["weak"].contexts[1]["your_research"][0]["text"] == "fact"  # redo keeps its own research
     assert court["weak"].tool_flags == [False, True]
     assert result.usage == {}  # fakes make no real API calls
     assert result.cases["weak"]["claim"] == "weak claim v2"
     events = [e.event for e in orch.blackboard._history["s1"]]
     assert events[-1] == "status" and events.index("usage") < len(events) - 1  # usage reaches the UI before "done"
+    assert result.scores["overall"] == 80 and events.index("scores") < events.index("verdict")
 
 
 @pytest.mark.asyncio

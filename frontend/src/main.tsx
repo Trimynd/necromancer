@@ -11,7 +11,7 @@ createRoot(document.getElementById('root')!).render(
       <Shell>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/case/:id" element={<CasePage />} />
+          <Route path="/case/:id/*" element={<CasePage />} />
         </Routes>
       </Shell>
     </BrowserRouter>

@@ -10,3 +10,5 @@ from app.services.blackboard import Blackboard
 
 blackboard = Blackboard()
 sessions: dict[str, SessionState] = {}
+# Uploaded company documents (id -> extracted text + meta); memory only, never on disk.
+documents: dict[str, dict] = {}

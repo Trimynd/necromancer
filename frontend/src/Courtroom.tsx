@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { initials, parseVerdict, sumSources, type CaseState, type Ghost } from './lib'
+import { Link } from 'react-router-dom'
+import { DOC_ICON, initials, parseVerdict, roundOf, sumSources, type CaseState, type Ghost } from './lib'
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -38,7 +39,7 @@ const PHASE_LABEL: Record<Ghost['phase'], string> = {
   dropped: 'Left the court',
 }
 
-function GhostFigure({ g, i, n, refCb }: { g: Ghost; i: number; n: number; refCb: (el: HTMLDivElement | null) => void }) {
+function GhostFigure({ g, i, n, refCb, href }: { g: Ghost; i: number; n: number; refCb: (el: HTMLDivElement | null) => void; href: string }) {
   const [open, setOpen] = useState(false)
   // Spread ghosts over the upper arc around the seal (desktop); CSS turns this into a grid on mobile.
   const a = ((165 + (210 * (i + 0.5)) / n) * Math.PI) / 180
@@ -46,7 +47,7 @@ function GhostFigure({ g, i, n, refCb }: { g: Ghost; i: number; n: number; refCb
   const y = 64 + 44 * Math.sin(a)
   const last = g.cases[g.cases.length - 1]
   const ruling = g.rulings[g.rulings.length - 1]?.ruling
-  const round = g.cases.length + (g.phase === 'redoing' ? 1 : 0)
+  const round = roundOf(g)
   const busy = g.phase === 'researching' || g.phase === 'thinking' || g.phase === 'redoing' || g.phase === 'spawned'
   return (
     <div
@@ -55,7 +56,7 @@ function GhostFigure({ g, i, n, refCb }: { g: Ghost; i: number; n: number; refCb
     >
       <div className="avatar-wrap" ref={refCb}>
         {(g.phase === 'researching' || g.phase === 'spawned') && <div className="orbit" aria-hidden><i /><i /></div>}
-        <div className="avatar font-serif text-ghost" style={{ color: 'var(--ink)' }}>{initials(g.name)}</div>
+        <Link to={href} className="avatar font-serif" style={{ color: 'var(--ink)' }} aria-label={`Read the testimony of ${g.name}`}>{initials(g.name)}</Link>
         {g.phase === 'accepted' && <span className="badge" style={{ background: 'var(--go)' }} aria-label="Accepted">✓</span>}
         {(g.phase === 'redoing' || g.phase === 'sent_back') && (
           <button
@@ -77,7 +78,7 @@ function GhostFigure({ g, i, n, refCb }: { g: Ghost; i: number; n: number; refCb
           </div>
         )}
       </div>
-      <div className="mt-1.5 line-clamp-2 text-[13px] font-medium leading-tight">{g.name}</div>
+      <Link to={href} className="mt-1.5 line-clamp-2 text-[13px] font-medium leading-tight hover:underline">{g.name}</Link>
       <div className={`text-xs ${g.phase === 'accepted' ? 'fam-go' : g.phase === 'redoing' || g.phase === 'sent_back' ? 'fam-stop' : 'text-ink-soft'}`}>
         {PHASE_LABEL[g.phase]}
         {round > 1 && g.phase !== 'dropped' && ` · Round ${round}`}
@@ -105,7 +106,7 @@ function GhostFigure({ g, i, n, refCb }: { g: Ghost; i: number; n: number; refCb
   )
 }
 
-export function Courtroom({ s }: { s: CaseState }) {
+export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: string) => string }) {
   const stage = useRef<HTMLDivElement>(null)
   const seal = useRef<HTMLDivElement>(null)
   const ghostEls = useRef<Record<string, HTMLDivElement | null>>({})
@@ -211,6 +212,11 @@ export function Courtroom({ s }: { s: CaseState }) {
       <div className="seal-wrap" ref={seal}>
         <Seal busy={(deliberating || writing || (!s.ghosts.length && s.status !== 'error' && s.status !== 'done'))} stamped={!!v} />
         <div className="mt-1 text-sm font-medium" style={{ color: 'var(--seal)' }}>Soul Binder</div>
+        {!!s.documents?.length && (
+          <div className="bench-docs" aria-label={`${s.documents.length} documents in evidence`}>
+            {s.documents.map((d) => <span key={d.id} title={d.name} className="appear">{DOC_ICON[d.kind] ?? '📄'}</span>)}
+          </div>
+        )}
         {v?.label && (
           <div className={`appear font-serif text-[22px] font-semibold leading-tight sm:text-[28px] fam-${v.family ?? 'caution'} max-w-[260px] text-center`}>
             {v.label}
@@ -220,7 +226,7 @@ export function Courtroom({ s }: { s: CaseState }) {
       </div>
       <div className="ghost-grid">
         {s.ghosts.map((g, i) => (
-          <GhostFigure key={g.id} g={g} i={i} n={s.ghosts.length} refCb={(el) => { ghostEls.current[g.id] = el }} />
+          <GhostFigure key={g.id} g={g} i={i} n={s.ghosts.length} href={ghostHref(g.id)} refCb={(el) => { ghostEls.current[g.id] = el }} />
         ))}
       </div>
     </section>

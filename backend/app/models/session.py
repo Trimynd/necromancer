@@ -25,12 +25,17 @@ class SessionState(BaseModel):
     input_url: str | None = None
     problem_statement: str | None = None
     depth: str = "deep"  # "fast" | "deep"
+    strict: bool = False
+    # Uploaded company documents: metadata is public (UI), full text stays server-side only.
+    documents: list[dict] = Field(default_factory=list)
+    document_texts: list[dict] = Field(default_factory=list, exclude=True)
     startup_data: dict[str, Any] | None = None
     route: dict[str, Any] | None = None
     manifest: AgentManifest | None = None
     cases: dict[str, Any] | None = None
     verdict: str | None = None
     summary: str | None = None
+    scores: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

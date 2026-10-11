@@ -1,16 +1,16 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Courtroom } from './Courtroom'
+import { Dashboard, Md, Report } from './Dashboard'
+import { TestimonyCard, TestimonyPanel } from './Ghost'
 import {
-  fromSnapshot, initialState, isMock, loadRecent, parseVerdict, patchRecent, reduce, saveRecent, startCase, sumSources,
-  type CaseState, type Ghost, type Case as GhostCase,
+  DOC_ICON, fromSnapshot, initialState, isMock, loadRecent, parseVerdict, patchRecent, reduce, saveRecent, startCase, sumSources,
+  type CaseState,
 } from './lib'
 import { MOCK_TEXT, playMock } from './mock'
 
 const EVENTS = [
-  'status', 'route', 'research', 'startup_data', 'manifest', 'pre_research', 'tool_call', 'agent_output', 'ghost_retry',
+  'status', 'documents', 'scores', 'route', 'research', 'startup_data', 'manifest', 'pre_research', 'tool_call', 'agent_output', 'ghost_retry',
   'ghost_dropped', 'window', 'rulings', 'report_chunk', 'verdict', 'summary', 'usage', 'call_log', 'error',
 ]
 
@@ -140,90 +140,6 @@ function Rail({ s, simple }: { s: CaseState; simple: boolean }) {
   )
 }
 
-const confWord = (c?: number) => (c == null ? '' : c >= 0.75 ? 'confident' : c >= 0.5 ? 'fairly sure' : 'unsure')
-const isUrl = (x?: string) => !!x && /^https?:\/\//.test(x)
-const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, '') } catch { return u } }
-
-function Claim({ c }: { c: GhostCase }) {
-  return (
-    <>
-      <blockquote className="font-serif text-[20px] leading-snug">“{c.claim || '(no claim given)'}”</blockquote>
-      {c.evidence.length > 0 && (
-        <ul className="mt-3 space-y-1.5 text-[15px]">
-          {c.evidence.map((e, i) => (
-            <li key={i} className={`flex flex-wrap items-baseline gap-x-2 ${!e.source ? 'text-ink-soft' : ''}`}>
-              <span>• {e.fact}</span>
-              {e.source_type && <span className="chip text-ink-soft">{e.source_type}</span>}
-              {isUrl(e.source) ? (
-                <a href={e.source} target="_blank" rel="noreferrer" className="text-sm text-seal underline underline-offset-2">
-                  {host(e.source!)} ↗
-                </a>
-              ) : e.source ? <span className="text-sm text-ink-soft">{e.source}</span> : <span className="text-xs italic">unsourced</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
-  )
-}
-
-function Testimony({ g }: { g: Ghost }) {
-  const cur = g.cases[g.cases.length - 1]
-  const old = g.cases.slice(0, -1)
-  return (
-    <article id={`ghost-${g.id}`} className={`bar-ghost py-4 ${g.phase === 'dropped' ? 'opacity-50' : ''}`}>
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-medium">{g.name}</h3>
-        {cur && (
-          <span className="text-sm text-ink-soft" title={cur.confidence != null ? `confidence ${cur.confidence}` : undefined}>
-            {[cur.emotion, confWord(cur.confidence) && `${confWord(cur.confidence)} · ${Math.round((cur.confidence ?? 0) * 100)}%`].filter(Boolean).join(' · ')}
-          </span>
-        )}
-      </header>
-      {g.phase === 'dropped' ? (
-        <p className="mt-1 text-sm text-ink-soft">Left the court: couldn't produce a case.{g.dropped && ` (${g.dropped})`}</p>
-      ) : !cur || g.phase === 'redoing' || (g.phase === 'researching' && g.cases.length) ? (
-        <p className="mt-1 text-sm text-ink-soft">
-          {g.cases.length ? 'Redoing the case' : 'Is investigating'}…{g.query && <> Searching: <em>{g.query}</em></>}
-        </p>
-      ) : null}
-      {old.map((c, i) => (
-        <details key={i} className="mt-2 text-ink-soft">
-          <summary className="cursor-pointer text-sm">{i === 0 ? 'First answer' : `Answer ${i + 1}`} (sent back)</summary>
-          <div className="mt-2 line-through decoration-1 opacity-70"><Claim c={c} /></div>
-        </details>
-      ))}
-      {cur && <div className="mt-2"><Claim c={cur} /></div>}
-      {g.searches.length > 0 && (
-        <p className="mt-2 text-xs text-ink-soft">Checked: {g.searches.map((q) => `“${q}”`).join(', ')}</p>
-      )}
-      {g.rulings.map(({ attempt, ruling: r }) => (
-        <div key={attempt} className="bar-seal mt-3 text-sm">
-          <span
-            className={`chip mr-2 font-medium ${r.decision === 'accept' ? 'fam-go' : 'fam-stop'}`}
-            style={{ borderColor: r.decision === 'accept' ? 'var(--go)' : 'var(--seal)' }}
-          >
-            {r.decision === 'accept' ? 'Accepted' : 'Sent back'}
-          </span>
-          <span className="text-ink-soft">Round {attempt + 1}{r.search_quality != null && ` · search quality ${Math.round(r.search_quality * 100)}%`}</span>
-          {r.reason && <p className="mt-1">{r.reason}</p>}
-          {r.decision === 'retry' && r.guidance && <p className="mt-1 font-serif italic">Soul Binder: “{r.guidance}”</p>}
-          {r.decision === 'retry' && !!r.needs_more && typeof r.needs_more !== 'boolean' && (
-            <p className="mt-1 text-ink-soft">Needs more: {Array.isArray(r.needs_more) ? r.needs_more.join(', ') : String(r.needs_more)}</p>
-          )}
-          {!!r.missing_sources?.length && <p className="text-ink-soft">Missing sources: {r.missing_sources.join(', ')}</p>}
-        </div>
-      ))}
-    </article>
-  )
-}
-
-const Md = ({ children }: { children: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (p) => <a {...p} target="_blank" rel="noreferrer" /> }}>
-    {children}
-  </ReactMarkdown>
-)
-
 function Elapsed({ running }: { running: boolean }) {
   const start = useRef(Date.now())
   const [, tick] = useState(0)
@@ -241,13 +157,40 @@ function Elapsed({ running }: { running: boolean }) {
 }
 
 export function CasePage() {
-  const { id = '' } = useParams()
+  const params = useParams()
+  const id = params.id ?? ''
+  const ghostId = params['*']?.match(/^ghost\/([^/]+)/)?.[1]
+  const { search } = useLocation()
+  const base = `/case/${id}`
   const nav = useNavigate()
   const { s, conn } = useCaseStream(id)
+  const t0 = useRef(Date.now())
+  const ranLive = useRef(false)
+  const [t1, setT1] = useState<number>()
   const [retrying, setRetrying] = useState(false)
   const simple = s.route?.complexity === 'simple'
   const finished = s.status === 'done' || s.status === 'error'
   const v = parseVerdict(s.verdict)
+  if (!finished && s.status !== 'pending') ranLive.current = true
+  useEffect(() => { if (finished) setT1((t) => t ?? Date.now()) }, [finished])
+  const seconds = ranLive.current ? Math.round(((t1 ?? Date.now()) - t0.current) / 1000) : undefined
+
+  // Glide to the verdict once, when it arrives live (never on reduced motion or a revisited case).
+  const scrolled = useRef(false)
+  useEffect(() => {
+    if (!s.verdict || scrolled.current || !ranLive.current || simple) return
+    scrolled.current = true
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    setTimeout(() => document.getElementById('verdict')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
+  }, [s.verdict, simple])
+
+  const download = () => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([s.report], { type: 'text/markdown' }))
+    a.download = `necromancer-${(s.text || 'case').slice(0, 40).replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
 
   useEffect(() => { document.title = s.text ? `${s.text.slice(0, 40)}… · Necromancer` : 'Case · Necromancer' }, [s.text])
   useEffect(() => { if (v?.label && !simple) patchRecent(id, { verdict: v.label }) }, [id, v?.label, simple])
@@ -255,9 +198,10 @@ export function CasePage() {
   const tryAgain = async () => {
     setRetrying(true)
     try {
-      const depth = loadRecent().find((r) => r.id === id)?.depth ?? 'fast'
-      const newId = await startCase({ text: s.text, url: s.text ? undefined : s.url, depth })
-      saveRecent({ id: newId, title: (s.text || s.url || 'Case').slice(0, 80), text: s.text, url: s.url, depth, at: Date.now() })
+      const old = loadRecent().find((r) => r.id === id)
+      const depth = old?.depth ?? 'fast'
+      const newId = await startCase({ text: s.text, url: s.text ? undefined : s.url, depth, document_ids: old?.document_ids, strict: old?.strict })
+      saveRecent({ id: newId, title: (s.text || s.url || 'Case').slice(0, 80), text: s.text, url: s.url, depth, at: Date.now(), document_ids: old?.document_ids, strict: old?.strict })
       nav(`/case/${newId}${isMock() ? '?mock=1' : ''}`)
     } catch { setRetrying(false) }
   }
@@ -279,7 +223,8 @@ export function CasePage() {
       {conn === 'reconnecting' && (
         <p role="status" className="no-print mb-3 rounded-md border border-hair px-3 py-2 text-sm text-ink-soft">Lost connection. Reconnecting…</p>
       )}
-      {showStage && <Courtroom s={s} />}
+      {showStage && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />}
+      {ghostId && <TestimonyPanel s={s} ghostId={ghostId} base={base} search={search} />}
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[180px_minmax(0,1fr)]">
         <Rail s={s} simple={simple} />
@@ -292,6 +237,22 @@ export function CasePage() {
             )}
             {s.url && <p className="mt-1 text-sm text-ink-soft">Website: <a className="underline" href={s.url} target="_blank" rel="noreferrer">{s.url}</a></p>}
           </section>
+
+          {!!s.documents?.length && (
+            <section id="documents" className="entry">
+              <h2 className="font-serif text-xl">Documents in evidence</h2>
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {s.documents.map((d) => (
+                  <li key={d.id} className="chip chip-doc flex max-w-full items-center gap-1.5 !px-2.5 !py-1 text-sm" title={d.preview}>
+                    <span aria-hidden>{DOC_ICON[d.kind] ?? '📄'}</span>
+                    <span className="truncate">{d.name}</span>
+                    <span className="shrink-0 opacity-75">{d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs text-ink-soft">Read as data to brief the council, never as instructions.</p>
+            </section>
+          )}
 
           {s.route && (
             <section className="entry text-[15px]">
@@ -320,7 +281,7 @@ export function CasePage() {
                       <span className="font-medium">{r.query}</span>
                       <span className="text-ink-soft">
                         {' '}· {r.chunks_stored} stored
-                        {r.per_source && ' · ' + Object.entries(r.per_source).map(([k, n]) => `${k} ${n}`).join(', ')}
+                        {r.per_source && ' · ' + Object.entries(r.per_source).map(([k, n]) => `${k === 'document' ? 'your documents' : k} ${n}`).join(', ')}
                       </span>
                     </li>
                   ))}
@@ -352,7 +313,9 @@ export function CasePage() {
               </section>
               <section id="testimony" className="entry">
                 <h2 className="font-serif text-[28px]">Testimony</h2>
-                <div className="mt-2 divide-y divide-hair">{s.ghosts.map((g) => <Testimony key={g.id} g={g} />)}</div>
+                <div className="mt-2 divide-y divide-hair">
+                  {s.ghosts.map((g) => <TestimonyCard key={g.id} g={g} href={`${base}/ghost/${g.id}${search}`} />)}
+                </div>
               </section>
             </>
           )}
@@ -371,15 +334,26 @@ export function CasePage() {
             </section>
           )}
 
+          {!simple && s.ghosts.length > 0 && (s.status === 'summarizing' || s.verdict || s.scores || finished) && (
+            <Dashboard s={s} seconds={seconds} />
+          )}
+
           {!simple && (s.report || s.status === 'summarizing') && (
             <section id="report" className="entry">
-              <div className={`md ${s.status === 'summarizing' ? 'caret' : ''}`}>
-                {s.report ? <Md>{s.report}</Md> : <p className="text-ink-soft">The Soul Binder is writing…</p>}
-              </div>
+              <h2 className="sr-only">Full report</h2>
+              {s.report ? (
+                <Report md={s.report} streaming={s.status === 'summarizing'} family={v?.family} />
+              ) : (
+                <div className="space-y-2" aria-label="The Soul Binder is writing">
+                  <p className="text-ink-soft">The Soul Binder is writing…</p>
+                  <div className="skel w-full" /><div className="skel w-11/12" /><div className="skel w-3/4" />
+                </div>
+              )}
               {s.status === 'done' && (
                 <div className="no-print mt-6 flex flex-wrap gap-2 text-sm">
+                  <button className="btn btn-seal" onClick={download}>Download report (.md)</button>
+                  <button className="btn btn-line" onClick={() => print()}>Print / PDF</button>
                   <button className="btn btn-line" onClick={() => navigator.clipboard?.writeText(location.href)}>Copy link</button>
-                  <button className="btn btn-line" onClick={() => print()}>Print / save as PDF</button>
                   <Link className="btn btn-line" to={isMock() ? '/?mock=1' : '/'}>Start a new case</Link>
                 </div>
               )}

@@ -33,7 +33,7 @@ Rule on every ghost's case, on its merits. Use your own judgement; there is no c
 - "retry" only when the case is off-topic, unsupported, contradicted by the evidence window,
   or its research clearly failed. Then say exactly what to search next and which source
   types would help (web, news, reddit, hackernews, wikipedia, finance, jobs, reviews, economy, google).
-Grade search_quality 0.0-1.0 (relevance, diversity, freshness of sources).
+{strict}Grade search_quality 0.0-1.0 (relevance, diversity, freshness of sources).
 
 Respond with STRICT JSON only:
 {{"rulings": [{{"agent_id": "...", "decision": "accept" | "retry", "reason": "...",
@@ -61,6 +61,23 @@ covering every company the evidence mentions (incumbents, rivals, failed peers).
 numbers; write "n/a" when the evidence doesn't give one.
 ## 6. Risks & open questions (flag single-source claims)
 ## 7. Recommended next steps"""
+
+
+STRICT_RULE = """STRICT MODE (the user asked for maximum rigour): send back any case whose key claim
+rests on a single source, on a source older than 2 years when fresher data matters, or on
+speculation presented as fact, even if the argument is otherwise good.
+"""
+
+SCORE_TASK = """QUESTION: {question}
+
+CASES (with your rulings):
+{cases}
+
+Score the situation from the evidence only. Respond with STRICT JSON only:
+{{"label": "the verdict label you would give, e.g. GO / PIVOT / NO-GO",
+  "dimensions": {{"Market demand": 0-10, "Competition": 0-10, "Unit economics": 0-10,
+                  "Regulation & risk": 0-10, "Execution": 0-10}}}}
+Higher is always better for the business (e.g. low competition = high score)."""
 
 
 class Ruling(BaseModel):
@@ -103,11 +120,22 @@ class SoulBinder:
             return await self._ask(task, temperature, think=False)
         return resp["text"]
 
+    async def score(self, question: str, cases: dict[str, dict]) -> dict:
+        """Per-dimension ratings from the model; the 0-100 overall is computed in code (flow.md rule)."""
+        raw = extract_json(await self._ask(SCORE_TASK.format(question=question, cases=_fmt(cases)),
+                                           temperature=0.1, think=False))
+        dims = {str(k): max(0.0, min(10.0, float(v))) for k, v in (raw.get("dimensions") or {}).items()
+                if isinstance(v, (int, float))}
+        overall = round(sum(dims.values()) / len(dims) * 10) if dims else None
+        return {"label": str(raw.get("label", "")), "dimensions": dims, "overall": overall}
+
     async def rule(
-        self, question: str, cases: dict[str, dict], window: list[dict] | None = None, think: bool = True
+        self, question: str, cases: dict[str, dict], window: list[dict] | None = None, think: bool = True,
+        strict: bool = False,
     ) -> dict[str, Ruling]:
         text = await self._ask(
-            RULING_TASK.format(question=question, cases=_fmt(cases), window=_fmt_window(window or [])),
+            RULING_TASK.format(question=question, cases=_fmt(cases), window=_fmt_window(window or []),
+                               strict=STRICT_RULE if strict else ""),
             temperature=0.2, think=think,
         )
         rulings: dict[str, Ruling] = {}

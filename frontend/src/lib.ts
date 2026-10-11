@@ -33,7 +33,12 @@ export interface Ghost {
   cases: Case[]
   rulings: { attempt: number; ruling: Ruling }[]
   dropped?: string
+  /** Search queries per round (index = round - 1), for the testimony timeline. */
+  roundSearches?: string[][]
+  persona?: string
 }
+export interface Doc { id: string; name: string; kind: string; chars?: number; pages?: number | null; preview?: string }
+export interface Scores { overall: number; label?: string; dimensions?: Record<string, number> }
 export interface Usage { [model: string]: { calls?: number; input?: number; output?: number; thinking?: number } }
 
 export interface CaseState {
@@ -51,6 +56,8 @@ export interface CaseState {
   verdict?: string
   usage?: Usage
   calls?: number
+  documents?: Doc[]
+  scores?: Scores
   error?: string
 }
 
@@ -78,6 +85,16 @@ function normalizeCase(o: Record<string, unknown>): Case {
     emotion: o.emotion ? String(o.emotion) : undefined,
     search_log: o.search_log as Case['search_log'],
   }
+}
+
+/** Round a ghost is in / was last ruled in: 1 + number of times it was sent back. */
+export const roundOf = (g: Ghost) => 1 + g.rulings.filter((r) => r.ruling.decision === 'retry').length
+
+const addSearch = (g: Ghost, qs: string[]) => {
+  const rounds = (g.roundSearches ?? []).slice()
+  const i = roundOf(g) - 1
+  rounds[i] = [...(rounds[i] ?? []), ...qs]
+  return rounds
 }
 
 const mapGhost = (s: CaseState, id: string, fn: (g: Ghost) => Ghost): CaseState => ({
@@ -109,11 +126,12 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
         ...s,
         domain: d.domain,
         problemSummary: d.problem_summary,
-        ghosts: (d.agents ?? []).map((a: { id: string; name: string; research?: { query?: string }[] }) => ({
+        ghosts: (d.agents ?? []).map((a: { id: string; name: string; system_prompt?: string; research?: { query?: string }[] }) => ({
           id: a.id,
           name: a.name,
           phase: s.status === 'in_court' ? 'researching' : 'spawned',
           query: a.research?.[0]?.query,
+          persona: a.system_prompt || undefined,
           searches: [],
           cases: [],
           rulings: [],
@@ -126,6 +144,7 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
           ...g,
           phase: g.phase === 'researching' || g.phase === 'spawned' ? 'thinking' : g.phase,
           searches: [...g.searches, ...rows.map((r) => r.query)],
+          roundSearches: addSearch(g, rows.map((r) => r.query)),
           query: rows[rows.length - 1]?.query ?? g.query,
         }))
       }
@@ -133,7 +152,7 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
     }
     case 'tool_call': {
       const q = d.args?.query ?? d.name
-      return mapGhost(s, d.agent_id, (g) => ({ ...g, phase: 'researching', query: q, searches: [...g.searches, q] }))
+      return mapGhost(s, d.agent_id, (g) => ({ ...g, phase: 'researching', query: q, searches: [...g.searches, q], roundSearches: addSearch(g, [q]) }))
     }
     case 'agent_output':
       return mapGhost(s, d.agent_id, (g) => ({ ...g, phase: 'presented', cases: [...g.cases, parseCase(d.output)] }))
@@ -155,6 +174,10 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
       }
       return next
     }
+    case 'documents':
+      return { ...s, documents: d?.items ?? d }
+    case 'scores':
+      return { ...s, scores: d }
     case 'report_chunk':
       return { ...s, report: s.report + String(d) }
     case 'summary':
@@ -194,12 +217,15 @@ export function fromSnapshot(snap: any): CaseState {
         name: a.name,
         phase: !c ? 'dropped' : !ruling ? 'presented' : ruling.decision === 'accept' ? 'accepted' : 'sent_back',
         dropped: c ? undefined : 'No case on file.',
+        persona: (a as { system_prompt?: string }).system_prompt,
         searches: ((c?.search_log as { queries?: string[] })?.queries) ?? [],
         cases: c ? [parseCase(c)] : [],
         rulings: ruling ? [{ attempt: 0, ruling }] : [],
       } as Ghost
     }),
     report: snap.summary ?? '',
+    documents: snap.documents ?? undefined,
+    scores: snap.scores ?? undefined,
     verdict: snap.verdict ?? undefined,
     usage: snap.usage ?? undefined,
     error: snap.error ?? undefined,
@@ -242,7 +268,7 @@ export const sumSources = (rows?: { per_source?: Record<string, number>; chunks_
   )
 
 // ---- recent cases (localStorage) ----
-export interface Recent { id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string }
+export interface Recent { id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean }
 export function loadRecent(): Recent[] {
   try { return JSON.parse(localStorage.getItem('recent-cases') || '[]') } catch { return [] }
 }
@@ -260,13 +286,33 @@ export function patchRecent(id: string, patch: Partial<Recent>) {
 export const isMock = () =>
   import.meta.env.VITE_USE_MOCK === 'true' || new URLSearchParams(location.search).get('mock') === '1'
 
-export async function startCase(body: { text?: string; url?: string; depth: string }): Promise<string> {
+/** POST /api/documents (multipart, field "files"). Throws with the server's `detail` on 400. */
+export async function uploadDocuments(files: File[]): Promise<Doc[]> {
+  if (isMock()) return files.map((f, i) => ({ id: `mock-doc-${i}`, name: f.name, kind: kindOf(f.name), chars: f.size }))
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  const res = await fetch('/api/documents', { method: 'POST', body: fd })
+  if (!res.ok) {
+    let detail = `Upload failed (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  return (await res.json()).documents ?? []
+}
+
+export const kindOf = (name: string) => {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : 'text'
+}
+export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx: '📘', text: '📄' }
+
+export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean }): Promise<string> {
   if (isMock()) return 'mock-' + Date.now().toString(36)
   const res = body.text
     ? await fetch('/api/problem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem_statement: body.text, depth: body.depth }),
+        body: JSON.stringify({ problem_statement: body.text, depth: body.depth, document_ids: body.document_ids ?? [], strict: !!body.strict }),
       })
     : await fetch('/api/revive', {
         method: 'POST',
@@ -276,3 +322,14 @@ export async function startCase(body: { text?: string; url?: string; depth: stri
   if (!res.ok) throw new Error(`The court couldn't open the case (${res.status}).`)
   return (await res.json()).session_id
 }
+
+// ---- highlighting numbers / money / percentages / dates in testimony ----
+const MONTH = String.raw`(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)`
+const NUM = String.raw`(?:Rs\.?\s?)?[₹$€£]?\d(?:[\d,]*\d)?(?:\.\d+)?`
+const UNIT = String.raw`(?:\s?(?:%|k\b|lakh\b|crore\b|cr\b|L\b|M\b|B\b|bn\b|km\b))?(?:\/(?:month|mo|meal|year|yr|day))?`
+const HIGHLIGHT = new RegExp(
+  String.raw`(\b\d{1,2}\s${MONTH}(?:\s\d{4})?\b|\b${MONTH}\s\d{4}\b|${NUM}(?:\s?(?:–|-|to)\s?${NUM})?${UNIT})`,
+  'g',
+)
+/** Splits text into [plain, match, plain, match, …]; odd indexes are numbers, money, % or dates. */
+export const splitHighlights = (t: string) => t.split(HIGHLIGHT)

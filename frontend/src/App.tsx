@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { familyOf, isMock, loadRecent, saveRecent, startCase } from './lib'
+import { DOC_ICON, familyOf, isMock, kindOf, loadRecent, saveRecent, startCase, uploadDocuments } from './lib'
 import { MOCK_TEXT } from './mock'
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -40,6 +40,11 @@ const SAMPLES: [string, string][] = [
   ['What is UPI?', 'What is UPI?'],
 ]
 
+const ACCEPT = ['pdf', 'csv', 'txt', 'md', 'docx']
+const MAX_FILES = 3
+const MAX_MB = 5
+const fmtSize = (b: number) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`)
+
 const ago = (t: number) => {
   const m = Math.round((Date.now() - t) / 60000)
   if (m < 1) return 'just now'
@@ -56,10 +61,31 @@ export function Home() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [recent] = useState(loadRecent)
+  const [files, setFiles] = useState<File[]>([])
+  const [fileMsg, setFileMsg] = useState('')
+  const [strict, setStrict] = useState(false)
+  const [dragging, setDragging] = useState(false)
   const urlOk = /^https?:\/\/\S+\.\S+/.test(url.trim())
   const t = text.trim()
-  // Short questions ("What is UPI?") are allowed: the router answers them directly.
-  const ok = (t.length >= 5 && t.length <= 4000) || (!t && urlOk)
+  // Short questions ("What is UPI?") are allowed: the router answers them directly. With documents attached,
+  // a couple of words ("Is this viable?") is enough.
+  const ok = (t.length >= (files.length ? 2 : 5) && t.length <= 4000) || (!t && urlOk && !files.length)
+
+  const addFiles = (list: FileList | null) => {
+    if (!list) return
+    const msgs: string[] = []
+    const next = [...files]
+    for (const f of Array.from(list)) {
+      const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+      if (!ACCEPT.includes(ext)) msgs.push(`${f.name}: only PDF, CSV, TXT, MD or DOCX files.`)
+      else if (f.size > MAX_MB * 1024 * 1024) msgs.push(`${f.name} is ${fmtSize(f.size)}; the limit is ${MAX_MB} MB.`)
+      else if (next.some((x) => x.name === f.name && x.size === f.size)) continue
+      else if (next.length >= MAX_FILES) { msgs.push(`Up to ${MAX_FILES} files, please.`); break }
+      else next.push(f)
+    }
+    setFiles(next)
+    setFileMsg(msgs.join(' '))
+  }
 
   useEffect(() => { document.title = 'Necromancer' }, [])
 
@@ -69,8 +95,10 @@ export function Home() {
     setBusy(true)
     setErr('')
     try {
-      const id = await startCase({ text: t || undefined, url: t ? undefined : url.trim(), depth })
-      saveRecent({ id, title: (t || url.trim()).slice(0, 80), text: t || undefined, url: url.trim() || undefined, depth, at: Date.now() })
+      const docs = files.length ? await uploadDocuments(files) : []
+      const document_ids = docs.map((d) => d.id)
+      const id = await startCase({ text: t || undefined, url: t ? undefined : url.trim(), depth, document_ids, strict })
+      saveRecent({ id, title: (t || url.trim()).slice(0, 80), text: t || undefined, url: url.trim() || undefined, depth, at: Date.now(), document_ids, strict })
       nav(`/case/${id}${isMock() ? '?mock=1' : ''}`)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -96,6 +124,54 @@ export function Home() {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit(e) }}
         />
+        <div
+          className={`rounded-md border border-dashed p-4 text-sm transition-colors ${dragging ? 'border-seal bg-sheet' : 'border-hair'}`}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files) }}
+        >
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Company details? Drop a pitch deck, financials or notes here, or</span>
+            <label className="btn btn-line cursor-pointer !px-3 !py-1 focus-within:outline-2 focus-within:outline-seal">
+              Choose files
+              <input
+                type="file"
+                multiple
+                accept={ACCEPT.map((x) => '.' + x).join(',')}
+                className="sr-only"
+                onChange={(e) => { addFiles(e.target.files); e.target.value = '' }}
+              />
+            </label>
+          </div>
+          <p className="mt-1 text-xs text-ink-soft">PDF, CSV, TXT, MD or DOCX · up to {MAX_FILES} files, {MAX_MB} MB each.</p>
+          {files.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-2" aria-label="Attached files">
+              {files.map((f, i) => (
+                <li key={f.name + f.size} className="chip flex max-w-full items-center gap-1.5 !px-2 !py-0.5 text-sm">
+                  <span aria-hidden>{DOC_ICON[kindOf(f.name)]}</span>
+                  <span className="truncate">{f.name}</span>
+                  <span className="shrink-0 text-ink-soft">{fmtSize(f.size)}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 px-1 text-ink-soft hover:text-ink"
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => { setFiles(files.filter((_, j) => j !== i)); setFileMsg('') }}
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {fileMsg && <p role="alert" className="fam-stop mt-2 text-sm">{fileMsg}</p>}
+          <p className="mt-2 text-xs text-ink-soft">
+            Files are read in memory to brief the council; they're treated as data, never as instructions.
+          </p>
+        </div>
+        <label className="flex items-start gap-2 text-sm text-ink-soft">
+          <input type="checkbox" className="mt-1 accent-[var(--seal)]" checked={strict} onChange={(e) => setStrict(e.target.checked)} />
+          <span>Strict Soul Binder — sends back any case with weak or single-source evidence (slower, more rigorous)</span>
+        </label>
         <div>
           <label htmlFor="url" className="text-sm text-ink-soft">Shut down already? Add its old website (optional)</label>
           <input id="url" type="url" className="field mt-1" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -118,8 +194,8 @@ export function Home() {
             {busy ? 'Opening…' : 'Open the case'}
           </button>
         </div>
-        {!ok && t.length > 0 && t.length < 5 && <p className="text-sm text-ink-soft">A few more words, please.</p>}
-        {err && <p role="alert" className="fam-stop text-sm">{err} Is the backend running on port 8000?</p>}
+        {!ok && t.length > 0 && t.length < (files.length ? 2 : 5) && <p className="text-sm text-ink-soft">A few more words, please.</p>}
+        {err && <p role="alert" className="fam-stop text-sm">{err}{/^(The court|Failed to fetch)/.test(err) && ' Is the backend running on port 8000?'}</p>}
       </form>
 
       <p className="mt-8 text-sm text-ink-soft">
