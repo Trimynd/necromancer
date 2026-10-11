@@ -5,13 +5,15 @@ CSV is read by code (numbers stay exact); limits keep one upload from eating the
 """
 
 import csv
+import re
 import io
 import uuid
 
 from docx import Document
+import openpyxl
 from pypdf import PdfReader
 
-from app.services.spreadsheets import SpreadsheetError, financials, read_sheets, sheets_text, verdict
+from app.services.spreadsheets import SpreadsheetError, financials, read_sheets, verdict
 
 MAX_FILES = 3
 MAX_BYTES = 5 * 1024 * 1024
@@ -19,7 +21,7 @@ MAX_PDF_PAGES = 10
 MAX_CHARS = 20_000  # per document, before it is chunked into evidence
 CSV_ROWS = 200
 
-KINDS = {".pdf": "pdf", ".csv": "csv", ".txt": "text", ".md": "text", ".docx": "docx", ".xlsx": "excel", ".xlsm": "excel"}
+KINDS = {".pdf": "pdf", ".csv": "csv", ".txt": "text", ".md": "text", ".docx": "docx", ".xlsx": "xlsx", ".xlsm": "xlsx"}
 
 
 class DocumentError(ValueError):
@@ -50,20 +52,57 @@ def _csv(data: bytes) -> str:
     return f"Table with columns: {', '.join(header)}\n" + "\n".join(lines) + more
 
 
-def _number(v: str) -> float | None:
-    s = str(v).replace(",", "").replace("\u20b9", "").replace("Rs", "").replace("%", "").strip()
+def _number(v) -> float | None:
+    """Spreadsheet number rules: real numbers as-is; text like '₹1,200', 'Rs 5 Cr', '12%', '(38.4)'
+    (accounting negative) or '−3' (unicode minus) parsed; anything else is not a number."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(",", "").replace("\u20b9", "").replace("\u2212", "-")
+    s = re.sub(r"(?i)^rs\.?|\b(cr|crore|lakh|lakhs|l|k|m|mn|bn)\b|%", "", s).strip()
+    neg = s.startswith("(") and s.endswith(")")
+    s = s.strip("()").strip()
     try:
-        return float(s)
+        n = float(s)
     except ValueError:
         return None
+    return -n if neg else n
 
 
 def table_and_stats(text: str) -> tuple[dict, dict]:
     """Exact numbers by code (flow.md): per numeric column first/last/min/max/change/trend."""
-    rows = list(csv.reader(io.StringIO(text)))
+    return rows_table_and_stats(list(csv.reader(io.StringIO(text))))
+
+
+def clean_rows(rows: list[list]) -> list[list]:
+    """Spreadsheet rules: drop fully empty rows and columns, start at the header row
+    (first row with 2+ filled cells, mostly text), turn dates into ISO strings."""
+    def cell(v):
+        if v is None:
+            return ""
+        if hasattr(v, "isoformat"):
+            return v.isoformat()[:10]
+        return v.strip() if isinstance(v, str) else v
+    rows = [[cell(c) for c in r] for r in rows]
+    rows = [r for r in rows if any(c != "" for c in r)]
+    if not rows:
+        return []
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    keep = [i for i in range(width) if any(r[i] != "" for r in rows)]
+    rows = [[r[i] for i in keep] for r in rows]
+    for start, r in enumerate(rows):
+        filled = [c for c in r if c != ""]
+        if len(filled) >= 2 and sum(isinstance(c, str) and _number(c) is None for c in filled) >= len(filled) / 2:
+            return rows[start:]
+    return rows
+
+
+def rows_table_and_stats(rows: list[list]) -> tuple[dict, dict]:
     if len(rows) < 2:
         return {"columns": rows[0] if rows else [], "rows": []}, {}
-    header, body = rows[0], rows[1 : CSV_ROWS + 1]
+    header, body = [str(h) for h in rows[0]], rows[1 : CSV_ROWS + 1]
     stats = {}
     for i, col in enumerate(header):
         vals = [_number(r[i]) for r in body if i < len(r)]
@@ -85,6 +124,28 @@ def table_and_stats(text: str) -> tuple[dict, dict]:
     return {"columns": header, "rows": typed}, stats
 
 
+def read_workbook(data: bytes) -> tuple[str, list[dict]]:
+    """Every tab of an Excel workbook. Numbers use the saved (calculated) values, not formulas.
+    Returns (text for the council, tabs with table + stats)."""
+    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    tabs, parts = [], []
+    for ws in wb.worksheets[:10]:
+        rows = clean_rows([list(r) for r in ws.iter_rows(max_row=CSV_ROWS + 50, values_only=True)])
+        if not rows:
+            continue
+        table, stats = rows_table_and_stats(rows)
+        tabs.append({"name": ws.title, "table": table, "stats": stats})
+        cols = table["columns"]
+        if len(cols) == 2 and not stats:  # a "Field | Value" tab: facts, not a table
+            lines = [f"{r[0]}: {r[1]}" for r in table["rows"] if len(r) > 1]
+        else:
+            lines = [" | ".join(map(str, cols))] + [" | ".join(map(str, r)) for r in table["rows"]]
+        parts.append(f"TAB '{ws.title}':\n" + _stats_brief(stats) + "\n".join(lines))
+    if not tabs:
+        raise DocumentError("the workbook is empty")
+    return "\n\n".join(parts), tabs
+
+
 def _docx(data: bytes) -> str:
     doc = Document(io.BytesIO(data))
     parts = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -98,7 +159,6 @@ def extract(name: str, data: bytes) -> dict:
         raise DocumentError(f"{name}: larger than 5 MB")
     kind = _kind(name)
     pages = None
-    sheets = None
     try:
         if kind == "pdf":
             text, pages = _pdf(data)
@@ -106,9 +166,8 @@ def extract(name: str, data: bytes) -> dict:
             text = _csv(data)
         elif kind == "docx":
             text = _docx(data)
-        elif kind == "excel":
-            sheets = read_sheets(name, data)
-            text = sheets_text(sheets)
+        elif kind == "xlsx":
+            text, tabs = read_workbook(data)
         else:
             text = data.decode("utf-8", errors="replace")
     except DocumentError:
@@ -117,7 +176,7 @@ def extract(name: str, data: bytes) -> dict:
         raise DocumentError(str(exc)) from exc
     except Exception as exc:
         raise DocumentError(f"{name}: could not be read ({type(exc).__name__})") from exc
-    text = " ".join(text.split()) if kind not in ("csv", "excel") else text.strip()
+    text = " ".join(text.split()) if kind not in ("csv", "xlsx") else text.strip()
     if not text:
         raise DocumentError(f"{name}: no readable text found (scanned PDF?)")
     text = text[:MAX_CHARS]
@@ -126,16 +185,14 @@ def extract(name: str, data: bytes) -> dict:
     if kind == "csv":
         doc["table"], doc["stats"] = table_and_stats(data.decode("utf-8-sig", errors="replace"))
         doc["text"] = _stats_brief(doc["stats"]) + doc["text"]
-    elif kind == "excel":
-        # The period-by-metric sheet becomes the same table + stats a CSV gets ("Your numbers", diffs).
-        fin = financials(sheets)
-        rows = next((s["rows"] for s in sheets if s["sheet"] == fin["sheet"]), sheets[0]["rows"])
-        out = io.StringIO()
-        csv.writer(out).writerows([["" if c is None else c for c in r] for r in rows])
-        doc["table"], doc["stats"] = table_and_stats(out.getvalue())
-        doc["text"] = _stats_brief(doc["stats"]) + doc["text"]
-    if kind in ("csv", "excel"):
-        _add_ledger(doc, sheets or read_sheets(name, data))
+    elif kind == "xlsx":
+        # the tab with the most numeric columns drives the charts and the v1->v2 diff
+        main = max(tabs, key=lambda t: len(t["stats"]))
+        doc.update(table=main["table"], stats=main["stats"], main_tab=main["name"],
+                   tabs=[{"name": t["name"], "columns": t["table"]["columns"], "rows": len(t["table"]["rows"]),
+                          "numeric_columns": list(t["stats"])} for t in tabs])
+    if kind in ("csv", "xlsx"):
+        _add_ledger(doc, read_sheets(name, data))
     return doc
 
 

@@ -26,20 +26,27 @@ def parse_url(url: str) -> tuple[str, str]:
 
 
 async def read_sheet(url: str) -> dict:
-    title, data, source = await fetch_csv(url)
-    doc = extract(f"{title}.csv", data)
+    title, data, source = await fetch_xlsx(url)
+    doc = extract(f"{title}.xlsx", data)
     return {**doc, "name": title, "kind": "sheet", "source": source}
 
 
-async def fetch_csv(url: str) -> tuple[str, bytes, str]:
-    """(title, CSV bytes, canonical sheet link) for a sheet shared as "Anyone with the link"."""
-    sheet_id, gid = parse_url(url)
-    export = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+async def fetch_xlsx(url: str) -> tuple[str, bytes, str]:
+    """(title, .xlsx bytes of every tab, canonical sheet link) for a sheet shared as "Anyone with the link"."""
+    sheet_id, _ = parse_url(url)
+    # xlsx export = every tab + calculated values; the CSV export only gives one tab and returns
+    # HTTP 400 for some sheets even when they're shared publicly.
+    export = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         resp = await client.get(export)
         # Private sheets redirect to a Google sign-in page (HTML) instead of CSV.
-        if resp.status_code in (401, 403, 404) or "text/csv" not in resp.headers.get("content-type", ""):
+        if resp.status_code in (401, 403) or "html" in resp.headers.get("content-type", "") and resp.status_code < 400:
             raise DocumentError(NOT_PUBLIC)
+        if resp.status_code == 404:
+            raise DocumentError("Google says this sheet doesn't exist. Check the link.")
+        if resp.status_code != 200 or not resp.content.startswith(b"PK"):
+            raise DocumentError(f"Google couldn't export this sheet (HTTP {resp.status_code}). "
+                                "Check it's a Google Sheet or Excel file shared as Anyone with the link → Viewer.")
         title = "Google Sheet"
         try:
             page = await client.get(f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
@@ -47,7 +54,7 @@ async def fetch_csv(url: str) -> tuple[str, bytes, str]:
             title = found.group(1).strip() if found else title
         except httpx.HTTPError:
             pass
-    return title, resp.content, f"https://docs.google.com/spreadsheets/d/{sheet_id}#gid={gid}"
+    return title, resp.content, f"https://docs.google.com/spreadsheets/d/{sheet_id}"
 
 
 if __name__ == "__main__":

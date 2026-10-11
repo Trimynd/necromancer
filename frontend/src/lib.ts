@@ -392,7 +392,7 @@ export async function connectSheet(url: string): Promise<Doc[]> {
 
 export const kindOf = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : ext === 'xlsx' || ext === 'xlsm' ? 'excel' : 'text'
+  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'xlsx' || ext === 'xlsm' ? 'xlsx' : ext === 'docx' ? 'docx' : 'text'
 }
 
 // ---------- Excel compare (POST /api/compare): verdicts computed in code, plus cell diffs ----------
@@ -440,9 +440,9 @@ export async function compareWorkbooks(files: File[]): Promise<Comparison> {
   }
   return res.json()
 }
-export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', excel: '📒', docx: '📘', text: '📄' }
+export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', xlsx: '📗', docx: '📘', text: '📄' }
 export const docLabel = (d: Doc) =>
-  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : d.kind === 'excel' ? 'Excel · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
+  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : d.kind === 'xlsx' ? 'Excel · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
     : d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''
 
 export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean; stage?: Stage }): Promise<string> {
@@ -508,11 +508,11 @@ export async function updateData(id: string, documentId: string, file: File, bod
 export const updateQuestion = (oldName: string, newName: string, v: number) =>
   `I uploaded a new version of my data (${oldName} → ${newName}, version ${v}). What changed, does it change the verdict, and what should I do now?`
 
-/** A shared Google Sheet as a CSV File (via the backend), so it can join the ledger comparison like an upload. */
+/** A shared Google Sheet as an .xlsx File (every tab, via the backend), so it can join the ledger comparison like an upload. */
 export async function sheetAsFile(url: string): Promise<File> {
   let res: Response
   try {
-    res = await fetch('/api/connectors/google-sheet/csv', {
+    res = await fetch('/api/connectors/google-sheet/file', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
     })
   } catch {
@@ -524,8 +524,8 @@ export async function sheetAsFile(url: string): Promise<File> {
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
   }
   const cd = res.headers.get('content-disposition') ?? ''
-  const name = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? 'Google Sheet.csv')
-  return new File([await res.blob()], name, { type: 'text/csv' })
+  const name = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? 'Google Sheet.xlsx')
+  return new File([await res.blob()], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
 }
 
 /** The backend words a refresh turn "My numbers were updated (version N)…": show it as "Data update vN". */

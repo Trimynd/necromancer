@@ -37,7 +37,7 @@ def test_upload_xlsx_as_document():
     data = _xlsx([["Month", "Revenue"], ["Jan", 100], ["Feb", 80]])
     r = client.post("/api/documents", files={"files": ("sales.xlsx", data, XLSX)})
     assert r.status_code == 200, r.text
-    assert r.json()["documents"][0]["kind"] == "excel"
+    assert r.json()["documents"][0]["kind"] == "xlsx"
 
 
 def test_same_layout_changed_values_shows_cells_and_verdict_change():
@@ -82,7 +82,7 @@ def test_excel_document_gets_table_stats_and_code_verdict(tmp_path):
     paths = {p.stem: p.read_bytes() for p in make_sample_excels.main(tmp_path)}
     from app.services.documents import extract
     d = extract("nykaa_fy2025.xlsx", paths["nykaa_fy2025"])
-    assert d["kind"] == "excel" and len(d["table"]["rows"]) == 4
+    assert d["kind"] == "xlsx" and len(d["table"]["rows"]) == 4
     assert d["stats"]["Revenue (₹ Cr)"]["last"] == 2062
     assert d["ledger"]["overall"] is not None
     assert d["text"].startswith("CODE HEALTH SCORE")  # the council reads the exact score + stats first
@@ -121,12 +121,14 @@ def test_update_data_swaps_a_file_and_diffs_cells_and_verdict(tmp_path, monkeypa
     assert bad.status_code == 400
 
 
-def test_google_sheet_csv_download(monkeypatch):
+def test_google_sheet_file_download(monkeypatch):
     from app.routes import documents as doc_routes
 
+    data = _xlsx([["Month", "Revenue"], ["Jan", 1], ["Feb", 2]])
+
     async def fake(url):
-        return "Shop / sales", b"month,revenue\nJan,1\nFeb,2\n", "https://docs.google.com/spreadsheets/d/x#gid=0"
-    monkeypatch.setattr(doc_routes, "fetch_csv", fake)
-    r = client.post("/api/connectors/google-sheet/csv", json={"url": "https://docs.google.com/spreadsheets/d/x"})
-    assert r.status_code == 200 and r.content.startswith(b"month,revenue")
-    assert "Shop%20sales.csv" in r.headers["content-disposition"]
+        return "Shop / sales", data, "https://docs.google.com/spreadsheets/d/x"
+    monkeypatch.setattr(doc_routes, "fetch_xlsx", fake)
+    r = client.post("/api/connectors/google-sheet/file", json={"url": "https://docs.google.com/spreadsheets/d/x"})
+    assert r.status_code == 200 and r.content == data
+    assert "Shop%20sales.xlsx" in r.headers["content-disposition"]

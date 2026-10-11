@@ -1,7 +1,7 @@
 // Plain-language verdict, the 90-day plan (Gantt as a CSS grid) and the detailed review. No recharts: renders instantly.
 import { useState, type ReactNode } from 'react'
 import { Md } from './Report'
-import { planCsv, type CaseState, type Family, type Plan, type PlanTask } from './lib'
+import { over as ended, planCsv, type CaseState, type Family, type Plan, type PlanTask } from './lib'
 
 // ---- glossary: one place for every bit of jargon on the page ----
 export const GLOSSARY: Record<string, string> = {
@@ -44,6 +44,23 @@ const LABELS: [RegExp, string][] = [
   [/^(let it rest|stay dead|rest in peace|bury)/i, 'Leave it closed'],
 ]
 export const explainLabel = (label?: string) => (label ? LABELS.find(([re]) => re.test(label.trim()))?.[1] : undefined)
+
+/** Health score arc (plain SVG, so the verdict page needs no chart library). */
+export function Gauge({ value, label, family, pending = true }: { value?: number; label?: string; family?: Family; pending?: boolean }) {
+  const v = Math.max(0, Math.min(100, value ?? 0))
+  const fam = family ?? (v >= 67 ? 'go' : v >= 40 ? 'caution' : 'stop')
+  return (
+    <svg viewBox="0 0 200 118" className="mx-auto block w-full max-w-[260px]" role="img" aria-label={value == null ? 'Health score not available' : `Health score ${v} out of 100${label ? `, ${label}` : ''}`}>
+      <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--hair)" strokeWidth="14" strokeLinecap="round" />
+      {value != null && (
+        <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke={`var(--${fam})`} strokeWidth="14" strokeLinecap="round"
+          pathLength={100} strokeDasharray={`${v} 100`} className="gauge-arc" />
+      )}
+      <text x="100" y="84" textAnchor="middle" fontSize="34" fontWeight="600" fontFamily="Bricolage Grotesque, sans-serif" fill="var(--ink)">{value == null ? '–' : v}</text>
+      <text x="100" y="106" textAnchor="middle" fontSize="13" fontWeight="600" fill={`var(--${fam})`}>{label ?? (value != null ? '/ 100' : pending ? 'working it out…' : '')}</text>
+    </svg>
+  )
+}
 
 const sureWords = (c: number) => (c >= 80 ? 'Very sure' : c >= 60 ? 'Fairly sure' : c >= 40 ? 'Not very sure' : 'Unsure')
 
@@ -106,7 +123,7 @@ export function PlainVerdict({ s, v, assumption }: {
     </section>
   )
 }
-const over = (s: CaseState) => s.status === 'done' || s.status === 'error' || s.status === 'interrupted'
+const over = (s: CaseState) => ended(s.status)
 const firstPara = (t?: string) => t?.split(/\n\s*\n/).find((x) => x.trim())?.trim()
 
 // ---- 90-day plan ----
@@ -256,18 +273,20 @@ const REVIEW: { key: 'strengths' | 'risks' | 'stop_doing'; title: string; icon: 
   { key: 'stop_doing', title: 'Stop doing', icon: '✋', fam: 'stop' },
 ]
 
-export function Review({ plan }: { plan?: Plan }) {
+/** `top`: the result page's short version, the first N strengths and risks only. */
+export function Review({ plan, top }: { plan?: Plan; top?: number }) {
   const r = plan?.review
   if (!r || !REVIEW.some((x) => r[x.key]?.length)) return null
+  const items = REVIEW.filter((x) => r[x.key]?.length && (!top || x.key !== 'stop_doing'))
   return (
-    <section id="review" className="entry">
-      <h2 className="font-serif text-[28px]">Detailed review</h2>
-      <div className="mt-3 grid gap-4 md:grid-cols-3">
-        {REVIEW.filter((x) => r[x.key]?.length).map((x) => (
+    <section id={top ? 'review-top' : 'review'} className="entry">
+      <h2 className="font-serif text-[28px]">{top ? `Top ${top} strengths and risks` : 'Detailed review'}</h2>
+      <div className={`mt-3 grid gap-4 ${top ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
+        {items.map((x) => (
           <div key={x.key} className="rounded-md border border-hair p-4" style={{ borderTop: `3px solid var(--${x.fam})` }}>
             <h3 className={`font-serif text-xl fam-${x.fam}`}><span aria-hidden>{x.icon} </span>{x.title}</h3>
             <ul className="mt-2 space-y-1.5 text-[15px]">
-              {r[x.key]!.map((t, i) => <li key={i} className="flex gap-2"><span aria-hidden className={`fam-${x.fam}`}>•</span><span>{t}</span></li>)}
+              {r[x.key]!.slice(0, top).map((t, i) => <li key={i} className="flex gap-2"><span aria-hidden className={`fam-${x.fam}`}>•</span><span>{t}</span></li>)}
             </ul>
           </div>
         ))}
