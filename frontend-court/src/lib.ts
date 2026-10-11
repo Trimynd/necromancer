@@ -306,9 +306,55 @@ export async function uploadDocuments(files: File[]): Promise<Doc[]> {
 
 export const kindOf = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : 'text'
+  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : ext === 'xlsx' || ext === 'xlsm' ? 'excel' : 'text'
 }
-export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx: '📘', text: '📄' }
+export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx: '📘', excel: '📗', text: '📄' }
+
+// ---------- Excel compare (POST /api/compare): verdicts computed in code, plus cell diffs ----------
+
+export interface LedgerVerdict {
+  overall: number | null; label: string; mode: string | null; headline: string
+  dimensions: Record<string, number>; kpis: Record<string, number>
+}
+export interface Ledger {
+  index: number; name: string; document_id: string; verdict: LedgerVerdict
+  financials: { sheet: string | null; periods: string[]; series: Record<string, (number | null)[]>; metrics: Record<string, string> }
+}
+export interface CellChange { sheet: string; row: string; column: string; a: unknown; b: unknown; delta: number | null; pct: number | null }
+export interface LedgerDiff {
+  from: number; to: number
+  cells: {
+    changes: CellChange[]; total_changed: number; paired_by: 'label' | 'position'
+    added_rows: string[]; removed_rows: string[]; added_columns: string[]; removed_columns: string[]
+  }
+  verdict: {
+    overall: { a: number | null; b: number | null; delta: number | null }
+    label: { a: string; b: string; changed: boolean }
+    dimensions: { key: string; label: string; a: number | null; b: number | null; delta: number | null }[]
+    kpis: { key: string; label: string; a: number | null; b: number | null; delta: number | null; pct: number | null }[]
+    drivers: string[]
+  }
+}
+export interface Comparison { workbooks: Ledger[]; diffs: Record<string, LedgerDiff> }
+
+/** 2-6 spreadsheets, oldest first. Throws with the server's `detail` on 400. */
+export async function compareWorkbooks(files: File[]): Promise<Comparison> {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  let res: Response
+  try {
+    res = await fetch('/api/compare', { method: 'POST', body: fd })
+  } catch {
+    throw new Error('Could not reach the backend. Is it running on port 8000?')
+  }
+  if (!res.ok) {
+    // Vite's proxy answers 5xx with no JSON when the backend isn't running.
+    let detail: unknown = res.status >= 500 ? 'The backend failed or is not running on port 8000.' : `Compare failed (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  return res.json()
+}
 
 export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean }): Promise<string> {
   if (isMock()) return 'mock-' + Date.now().toString(36)

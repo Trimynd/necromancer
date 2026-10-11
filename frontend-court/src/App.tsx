@@ -18,9 +18,12 @@ export function Shell({ children }: { children: ReactNode }) {
         <Link to={isMock() ? '/?mock=1' : '/'} className="font-serif text-xl font-semibold">
           Necromancer
         </Link>
-        <button onClick={toggle} className="btn btn-line text-sm" aria-label="Toggle light or dark theme">
-          ◐ Theme
-        </button>
+        <nav className="flex items-center gap-2">
+          <Link to="/compare" className="btn btn-line text-sm">📗 Compare Excel</Link>
+          <button onClick={toggle} className="btn btn-line text-sm" aria-label="Toggle light or dark theme">
+            ◐ Theme
+          </button>
+        </nav>
       </header>
       <main className="mx-auto max-w-6xl px-4 pb-16">{children}</main>
     </div>
@@ -60,7 +63,7 @@ const DEMOS: { title: string; short: string; stage: Stage; text: string; url?: s
   },
 ]
 
-const ACCEPT = ['pdf', 'csv', 'txt', 'md', 'docx']
+const ACCEPT = ['pdf', 'csv', 'xlsx', 'xlsm', 'txt', 'md', 'docx']
 const MAX_FILES = 3
 const MAX_MB = 5
 const fmtSize = (b: number) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`)
@@ -100,7 +103,7 @@ export function Home() {
     const next = [...files]
     for (const f of Array.from(list)) {
       const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
-      if (!ACCEPT.includes(ext)) msgs.push(`${f.name}: only PDF, CSV, TXT, MD or DOCX files.`)
+      if (!ACCEPT.includes(ext)) msgs.push(`${f.name}: only PDF, Excel, CSV, TXT, MD or DOCX files.`)
       else if (f.size > MAX_MB * 1024 * 1024) msgs.push(`${f.name} is ${fmtSize(f.size)}; the limit is ${MAX_MB} MB.`)
       else if (next.some((x) => x.name === f.name && x.size === f.size)) continue
       else if (next.length >= MAX_FILES) { msgs.push(`Up to ${MAX_FILES} files, please.`); break }
@@ -218,7 +221,7 @@ export function Home() {
                 />
               </label>
             </div>
-            <p className="mt-1 text-xs text-ink-soft">PDF, CSV, TXT, MD or DOCX · up to {MAX_FILES} files, {MAX_MB} MB each.</p>
+            <p className="mt-1 text-xs text-ink-soft">PDF, Excel (XLSX), CSV, TXT, MD or DOCX · up to {MAX_FILES} files, {MAX_MB} MB each.</p>
             {files.length > 0 && (
               <ul className="mt-2 flex flex-wrap gap-2" aria-label="Attached files">
                 {files.map((f, i) => (
@@ -290,6 +293,16 @@ export function Home() {
                 <button type="button" className="underline underline-offset-2 hover:text-ink" onClick={() => { setText('What is UPI?'); setUrl('') }}>What is UPI?</button>
               </li>
             </ul>
+          </section>
+
+          <section aria-labelledby="compare-h">
+            <h2 id="compare-h" className="font-serif text-xl">Compare financials</h2>
+            <p className="text-xs text-ink-soft">
+              Two Excel sheets of the same business (last year vs this year, actual vs what-if): see every changed number and how it moves the verdict.
+            </p>
+            <Link to="/compare" className="btn btn-line mt-2 flex w-full items-center justify-between !px-3 !py-2 text-sm">
+              <span>📗 Open the ledger comparison</span><span aria-hidden>→</span>
+            </Link>
           </section>
 
           <RecentCases recent={recent} />
