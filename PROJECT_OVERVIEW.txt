@@ -1,0 +1,845 @@
+================================================================================
+                        PROJECT NECROMANCER
+                     "From idea to afterlife."
+            Complete project overview: idea, design, code, status
+================================================================================
+
+Compiled from every document in docs/ and every source file in backend/ and
+frontend/ as of 2026-10-11 (branch: garv).
+
+Contributors (from git history): Garv Kumar, Prabal Batra, Atri Rathore
+(rathoreatri03).
+
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+ 1. One-paragraph summary
+ 2. How the idea evolved
+ 3. The problem and the pitch
+ 4. The 4 modes
+ 5. The user journey (5 screens)
+ 6. The core innovation: the Role Maker and dynamic agents
+ 7. Credibility rules (numbers, facts, documents)
+ 8. The report (what the user gets)
+ 9. The financial engine (the maths)
+10. Visual identity ("cyber-necromancy")
+11. System architecture
+12. Backend: what is actually built
+13. Frontend: what is actually built
+14. Database and data connectors
+15. API reference
+16. Tech stack and setup
+17. Demo plan
+18. Future scope and business model
+19. Status: spec vs. built, gaps and inconsistencies
+20. File map
+
+
+================================================================================
+1. ONE-PARAGRAPH SUMMARY
+================================================================================
+
+Necromancer is an agentic AI platform that tells a business owner where they
+stand and what to do next, at any stage of the company's life: a new idea
+(Launch), a working company (Grow), a declining company (Rescue), or a dead
+company (Revive). The user describes the business and/or uploads documents.
+A "Role Maker" agent powered by Google's Gemma model reads the situation and
+invents a custom team of specialist AI agents ("ghosts") for that specific
+business. Nothing about the team is hardcoded. The ghosts research the web in
+parallel and keep their sources. An adversarial step (the "Devil's Advocate" /
+"Grand Inquisitor", or in the current backend a "Judge") attacks and weighs
+their findings. The user receives a verdict report with pros/cons,
+competitors, market size, investment needs, a 24-month ROI projection with
+live sliders, and a concrete action plan. The rule that holds it together:
+AI estimates the assumptions, plain code does the maths, and every claim
+carries a source.
+
+
+================================================================================
+2. HOW THE IDEA EVOLVED
+================================================================================
+
+The project went through three stages. All three still leave traces in the
+code and docs, which explains some inconsistencies (see section 19).
+
+STAGE 1: "Necromancer for Dead Startups" (docs/idea.md)
+  - Domain: dead FINTECH startups, plus general fintech problem solving.
+  - Input: the URL of a dead startup.
+  - Flow: scrape the Wayback Machine, GitHub and Hacker News -> "autopsy"
+    -> Role Maker spawns "ghost employees" (Ghost CEO, Ghost CTO,
+    Compliance Officer, Fraud Analyst) -> they debate on a shared
+    blackboard -> Ghost CTO builds a "zombie MVP" landing page -> Ghost
+    CEO pitches the user for "soul tokens".
+  - Taglines: "Y Combinator for the afterlife." / "We don't just remember
+    dead fintech startups. We rehire them, and give them a compliance
+    officer."
+  - Fintech angle: RBI FREE-AI framework, KYC/AML, NPCI agentic UPI,
+    "Know Your Agent".
+
+STAGE 2: "Startup Analyzer: Mixture of Agents" (docs/flow.md, modes.md,
+         demo-spec.md, buisness_target/)
+  - Broadened from dead fintech startups to ANY business at ANY stage.
+  - Introduced the 4 modes (Launch / Grow / Rescue / Revive).
+  - Introduced document upload, adaptive intake questions, Devil's
+    Advocate, the fixed report structure, and the "code does the maths"
+    rule.
+  - Explicit decisions recorded: Revive is for an owner restarting THEIR
+    OWN company (no URL scraping of strangers, no deployed zombie site);
+    Grow mode merges growth with threat analysis ("Competitive Fortress").
+  - Target: a 6-hour hackathon build by 3 people.
+
+STAGE 3: "Project Necromancer" cyber-necromantic product
+         (docs/frontend-spec.md, frontend/)
+  - Keeps the Stage 2 product but wraps it in a strong spooky/occult-tech
+    visual identity: "Crypt Entrance", "Summoning Circle", "Spectral
+    Courtroom", "Grand Inquisitor", "Tome of Prophecy".
+  - The backend meanwhile moved to a "courtroom" model: ghosts present
+    cases, a Judge rules on them, sends weak ones back, then delivers a
+    verdict.
+  - UI eyebrow text targets "MLH HACKTOBERFEST".
+
+
+================================================================================
+3. THE PROBLEM AND THE PITCH
+================================================================================
+
+Problem
+  Businesses die on assumptions nobody tested ("assumption debt"). Founders
+  and small-business owners lack an affordable way to stress-test a plan,
+  diagnose a decline, or judge whether a dead business can come back.
+  Existing options are either a generic chatbot ("ask ChatGPT about my
+  startup") or expensive consultants.
+
+Solution
+  A one-pipeline tool that works at every life stage, builds a different
+  expert team for every business, researches with citations, attacks its
+  own conclusions, and does the finance maths deterministically in code.
+
+Pitch lines (from the docs)
+  - "From idea to afterlife."
+  - "Every business dies on an assumption nobody tested. We find yours
+    before you spend a rupee."
+  - "Same pipeline, 4 situations, a different team every time.
+    Researched, cited, calculated."
+  - "We don't just resurrect the startup. We resurrect the founder's blind
+    spot." (research.md)
+
+Why it beats a chatbot
+  - Dynamic agent teams instead of one generic answer.
+  - Every claim cited; numbers computed by code, not invented by the AI.
+  - Starts from the user's real documents and numbers.
+  - Works across the whole company lifecycle.
+
+Primary market: India (rupee figures, RBI/FSSAI/GST compliance, Pune sample
+companies, WhatsApp and Indian-language roadmap).
+
+
+================================================================================
+4. THE 4 MODES
+================================================================================
+
+The pipeline is always the same. The mode changes only four things: the core
+intake questions, the adaptive probing goal, the Devil's Advocate attack, and
+one "signature" report section.
+
++---------+-------------------+------------------------+----------------------+
+| Mode    | User says         | Core question          | Verdict labels       |
++---------+-------------------+------------------------+----------------------+
+| Launch  | "I want to start  | Should I build this?   | GO / PIVOT / NO-GO   |
+| (seed)  |  X"               |                        |                      |
+| Grow    | "It works, make   | Where can I grow, and  | Top 3 levers +       |
+|         |  it better"       | what could kill me?    | growth score +       |
+|         |                   |                        | threat level         |
+| Rescue  | "My numbers are   | Why am I declining,    | RECOVERABLE /        |
+|         |  going down"      | how do I fix it?       | RESTRUCTURE /        |
+|         |                   |                        | WIND DOWN            |
+| Revive  | "My company died, | Why did it die, and    | REVIVE / REVIVE WITH |
+|         |  I want it back"  | what's different now?  | PIVOT / STAY DEAD    |
++---------+-------------------+------------------------+----------------------+
+
+Themed names (frontend): Launch = "The Genesis Ritual" (emerald),
+Grow = "The Blood Pact" (cobalt), Rescue = "Emergency Exorcism" (amber),
+Revive = "Digital Necromancy" (violet).
+
+Mode selection: 4 cards on the landing page; the AI preselects one from the
+pitch or uploaded document; the user confirms with one click.
+
+Per-mode details
+
+  LAUNCH
+    Core questions: budget, location/market, team & skills, timeline, what
+      exists already, price + monthly cost.
+    Probing goal ("Is this idea real?"): exact customer, proof of payment,
+      unfair advantage, first-100-customers channel, regulatory red flags.
+    Attack: PRE-MORTEM. "It's 12 months from now and you're dead. Why?"
+    Signature: Riskiest Assumption (+ pre-mortem narrative).
+
+  GROW
+    Core questions: monthly revenue + P/L, customers + growth, team + top
+      costs, acquisition channels, what works best, goal.
+    Probing goal ("Where's the bottleneck?"): concentration risk, demand vs.
+      capacity limits, best segment, unit economics per segment, waste,
+      biggest threat, moat.
+    Attack: RED TEAM. "If I were a new entrant, how would I destroy you?"
+      plus the WRAPPER TRAP: "What if a big platform ships this for free?"
+    Signature: Growth levers (impact x effort) + Threats (new-entrant
+      attack, threat list, wrapper trap, moat check).
+
+  RESCUE
+    Core questions: last 6-12 months of revenue/users/costs, when decline
+      started, what changed, churn & CAC before vs. now, cash in bank,
+      what was already tried.
+    Probing goal ("Where exactly is it breaking?"): fewer customers vs. less
+      per customer, footfall vs. conversion, which segment fell first,
+      timing vs. events, retention vs. acquisition, runway, team issues.
+    Attack: "Why will the turnaround fail too?"
+    Signature: "Where you're failing" (sales trend chart with red-flag
+      event markers + ranked root causes with % share of decline) and
+      THE ONE THING: one customer, one channel, one action this week;
+      everything else ranked below, non-essential work marked "pause".
+
+  REVIVE
+    Core questions: what it did and who paid, when it shut down, why the
+      owner thinks it died, peak metrics, assets left (brand, users,
+      code, licences, team), restart budget.
+    Probing goal ("Was the cause of death fixable?"): real cause vs.
+      founder belief, what changed since, recoverable assets, would
+      customers return, founder readiness.
+    Attack: "Why will it die a second time?"
+    Signature: Digital Autopsy (real cause of death vs. founder's belief,
+      what's different now, recoverable assets / "relics").
+
+Demo sample company per mode
+  Launch : Student tiffin (meal) subscription, Pune -> PIVOT (add corporate
+           tiffins; demand real, margins thin)
+  Grow   : 3-branch coaching institute ("Apex Coaching Academy") -> 70% of
+           students from one channel; a free online platform is the threat
+  Rescue : 2-store mobile phone shop, Pune -> chain store opened nearby with
+           multi-bank no-cost EMI + online shift; one-bank EMI is the
+           fixable cause. Sales Rs 18L -> Rs 9L/month, Rs 12L cash.
+  Revive : "QuickKart" neighbourhood grocery delivery app, shut 2022 -> died
+           from delivery cost per order; viable now as group orders for
+           apartment societies.
+
+Worked Rescue example (from modes.md), condensed
+  Pitch: "My company sells mobile phones. Sales used to be good, now
+  decreasing." -> Rescue preselected -> intake reveals a chain store opened
+  1 km away in Feb and EMI is offered through only one bank -> Role Maker
+  spawns Local Retail Competition Scout, Online Channel Analyst, Financing &
+  EMI Analyst, Sales Data Investigator -> Devil's Advocate: "You can't beat a
+  chain store or Amazon on price; discounts burn your Rs 12L; ~7 months left"
+  -> Verdict RECOVERABLE (health 48/100) -> root causes ranked (chain store
+  ~45%, online shift ~30%, one-bank EMI ~15% [internal, fixable], discount
+  assumption ~10%) -> ONE thing: sign 3 more EMI partners this week, pause
+  blanket discounts.
+
+
+================================================================================
+5. THE USER JOURNEY (5 SCREENS)
+================================================================================
+
+Pitch -> Intake -> Role Maker -> Research -> Devil's Advocate -> Synthesis
+-> Report.
+
+Screen 0  PITCH  ("The Crypt Entrance")
+  - Text box (>= 20 chars) and/or file upload (PDF, CSV/Excel must;
+    images should; DOCX/PPTX stretch). Max 3 files, 10 pages, 5 MB each.
+  - Interactive "Lifeline Curve" SVG (Idea -> Peak -> Decline -> Dead ->
+    Reborn) and 4 mode cards with AI preselect.
+  - Sample chips, one per mode, which also act as the offline demo
+    fallback ("saved runs").
+
+Screen 1  INTAKE  ("The Scrying Pool")
+  - "What I learned from your document" card: every extracted field shows
+    its source (page/file) and a state: found / please check / not found.
+    CSV numbers are "exact" (read by code); PDF numbers are "please check".
+  - Mode core questions (~6, fixed) then up to 4 adaptive AI follow-ups,
+    one at a time, each showing WHY it is asked, with quick-pick options.
+  - Completeness meter; user can skip to research at any time.
+  - Ends with an editable Business Profile card.
+  - Planned endpoint: next_question(mode, pitch, answers) ->
+    {question, why, options[]} or {done: true}.
+
+Screen 2  TEAM ASSEMBLY  ("The Summoning Circle")  - wow moment #1
+  - Gemma's one-line reasoning for the team, then agent cards appear one
+    by one: emoji, invented name, role, one-line mission, which report
+    sections it covers.
+
+Screen 3  LIVE RESEARCH  ("The Spectral Courtroom")
+  - Per-agent status: Queued -> Searching -> Reading -> Analyzing -> Done
+    (Failed shows retry). Source counter per agent. Live timestamped feed.
+  - Red "Devil's Advocate / Grand Inquisitor is attacking your plan" card.
+  - "Gemma is merging findings..." then the report opens.
+
+Screen 4  REPORT  ("The Tome of Prophecy")
+  - Single scrolling page with sticky section nav. See section 8.
+
+
+================================================================================
+6. THE CORE INNOVATION: THE ROLE MAKER AND DYNAMIC AGENTS
+================================================================================
+
+The agent topology is not hardcoded. For every request, the Role Maker
+(Gemma, large model) reads the problem and outputs an AgentManifest (JSON):
+for each agent an id, display name, system prompt, tool list, temperature
+and priority, plus a domain and problem summary.
+
+Rules given to the Role Maker (current backend prompt):
+  - 2 to MAX_AGENTS agents (default 5); fewer is better; no overlapping
+    roles.
+  - No judge/lead/hub/moderator agent (the Judge is fixed and separate).
+  - Consider compliance (RBI FREE-AI, KYC, AML), fraud/risk, UX and
+    technical feasibility only when relevant.
+  - Tools only from the registry; every ghost automatically gets
+    search_memory and web_research.
+  - Do not hallucinate private data; label speculation.
+Safety net: if the output can't be parsed or validated, a fallback team
+(Ghost CEO + Compliance Officer) is used. Agent count and tools are clamped
+in code.
+
+Planned rule (docs): every report section (pros/cons, competitors, market,
+investment, ROI) must be covered by at least one agent.
+
+Example teams from the docs
+  Tiffin delivery, Pune   -> Local Food Market Analyst, Delivery Logistics
+                             Expert, Student Pricing Analyst, FSSAI
+                             Compliance Checker
+  BNPL app for students   -> Credit Risk Analyst, RBI Lending Compliance
+                             Officer, Fintech Competitor Scout, Unit
+                             Economics Modeller
+  Gym chain, Tier-2 towns -> Real Estate & Location Scout, Fitness Market
+                             Analyst, Capex & Break-even Planner
+
+Shared agent "thinking checklist" (planned output per agent, one call,
+one JSON): findings, core_assumption, evidence_for[], evidence_against[],
+risks[] tagged external / internal / assumption with countermeasures,
+unit_economics_note, sources[].
+
+Every agent is a generic, config-driven BaseAgent: Observe (read the shared
+blackboard, minus its own entries) -> Think/Act (Gemma call with function
+calling) -> run tool calls -> Reflect (revise the draft against tool
+results) -> write output to the blackboard and stream it.
+
+
+================================================================================
+7. CREDIBILITY RULES
+================================================================================
+
+Numbers rules
+  1. Code does the maths, not the AI. Gemma only estimates assumptions;
+     code computes break-even, ROI, LTV:CAC, runway, viability score.
+  2. Show the assumptions, each tagged "from you", "from research (link)"
+     or "AI estimate".
+  3. Make them editable sliders; the verdict updates live in the browser.
+  4. Give ranges, not single numbers ("ROI 18-35% by year 2").
+  5. No uncited statistics in the product or the pitch.
+
+Facts rule
+  No statistic goes into a prompt, the product or the pitch without a source
+  link. modes.md explicitly flags the research notes' "42% / 43% / 44% fail
+  from no market need" figures as uncited and contradictory.
+
+Document rules
+  - Files processed in memory and never stored (the UI says so).
+  - Document text is data, never instructions (prompt-injection defence).
+  - Numbers from PDFs are marked "please check"; CSV numbers are exact.
+  - One AI call per document.
+
+Scoring rule
+  Viability = sum(score x weight) x 10, weights fixed in code:
+    Market demand 25%, Financial viability 25%, Competition 15%,
+    Execution fit 15%, Regulatory ease 10%, Timing 10%.
+  >= 70 GO, 40-69 PIVOT, < 40 NO-GO. If the Devil's Advocate says the plan
+  doesn't survive, the verdict is capped at PIVOT.
+
+
+================================================================================
+8. THE REPORT
+================================================================================
+
+The agents change every run; the report sections never do.
+
+  Verdict             Radial gauge 0-100, badge, one-line summary, top 3
+                      reasons, confidence (based on source count)
+  Riskiest assumption The one untested belief the plan rests on, why it
+                      matters, a cheap test, the pass signal. Day 1 of the
+                      plan = run this test. (Themed: "Cursed Assumption",
+                      "Cheap Exorcism")
+  Strongest argument  The Devil's Advocate attack + survives / survives
+  against you         with changes / doesn't survive + what would fix it
+  Score breakdown     6 dimensions, 0-10, horizontal bars with reasons
+  Pros / Cons         Impact-tagged, each with a source link
+  Competitors         Table (name, offer, pricing, funding, strength,
+                      weakness, threat) + price-vs-presence scatter with
+                      "you" as a star
+  Market              TAM / SAM / SOM circles, growth line + CAGR,
+                      customer persona, trends
+  Investment          One-time cost bars, monthly cost stack, runway bar,
+                      funding route (bootstrap / angel / seed / loan)
+  ROI                 24-month cumulative cash, 3 scenarios, break-even
+                      marked, KPI tiles (break-even month, ROI 12/24,
+                      peak cash, LTV:CAC, CAC payback), live sliders
+  Risks               Category, likelihood, impact, mitigation
+  Before you launch   Licences/registrations (FSSAI, GST, Shop &
+                      Establishment, RBI...) with issuer, cost, time, link
+  Next steps          30/60/90-day plan; MVP features
+  Sources             Every link, grouped by agent
+  + Mode signature section (see section 4)
+
+The full backend->frontend JSON data contract is in docs/demo-spec.md
+("Data contract"), with live SSE events: document_parsed, team,
+agent_status, agent_log, agent_done, devils_advocate, synthesizing, report.
+
+
+================================================================================
+9. THE FINANCIAL ENGINE
+================================================================================
+
+Implemented in frontend/src/utils/financialEngine.js (pure JS, client side,
+recomputed on every slider move, no AI call).
+
+  customers[m]  = customers[m-1] x (1 + growth) x (1 - churn) + new_per_month
+  revenue[m]    = customers[m] x price
+  cost[m]       = fixed_cost + customers[m] x variable_cost
+  cumulative[m] = -startup_cost + sum(revenue - cost)
+  break_even    = first month where cumulative >= 0
+  ROI@24        = cumulative[24] / startup_cost
+  scenarios     = growth x 0.5 (pessimistic), x 1.0 (base), x 1.5 (optimistic)
+  margin        = price - variable_cost
+  LTV           = margin / churn         (churn floored at 0.5%)
+  LTV:CAC       = LTV / CAC   (>=3 healthy, 1-3 thin, <1 losing money)
+  CAC payback   = CAC / margin (months)
+
+Note: the implemented viability score is a simplified heuristic (start at
+50; +25/+15/+5/-20 by break-even month; +20/+10/-25 by LTV:CAC; clamped to
+12-96), not the 6-dimension weighted formula from the spec. Formatting
+helpers render rupees as L (lakh) and Cr (crore).
+
+
+================================================================================
+10. VISUAL IDENTITY
+================================================================================
+
+"Spooky cyber-necromancy": obsidian backgrounds, glowing ectoplasm cyan /
+emerald accents, spectral card glows, runic gradient borders, breathing
+pulse on researching agents, CRT-terminal logs.
+
+  Fonts   : Bricolage Grotesque / Cinzel Decorative (headings), IBM Plex
+            Sans (body), IBM Plex Mono / JetBrains Mono (data, logs)
+  Colours : void #05080A / #0B1216 / #111A20, ghost-ink #E6F4F1,
+            launch #10B981, grow #3B82F6, rescue #F59E0B, revive #A855F7,
+            blood/no-go #EF4444, gold/pivot #EAB308, cyan #14B8A6
+  Audio   : optional ambient drone + "ghost chime", synthesised with the
+            Web Audio API (no audio files), muted by default
+            (frontend/src/utils/spookyAudio.js)
+  Assets  : hero_banner.jpg, graveyard_altar.jpg, inquisitor.jpg in
+            frontend/public/assets/
+
+Themed vocabulary: Crypt Entrance, Relic Dropzone, Scrying Pool, Grimoire,
+Summoning Circle, Ghost Agents, Spectral Courtroom, Grand Inquisitor, Tome of
+Prophecy, Cursed Assumption, Alchemical Sandbox, Rivals Arena, Treasury,
+Citations Codex.
+
+
+================================================================================
+11. SYSTEM ARCHITECTURE
+================================================================================
+
+  [ React + Vite frontend ]
+          |  POST /api/problem or /api/revive  ->  {session_id, stream_url}
+          |  GET  /api/stream/{id}   (Server-Sent Events)
+          v
+  [ FastAPI backend ]
+     Orchestrator
+       |-- Router agent (simple vs complex, needs web?, search queries)
+       |-- Web research (Wikipedia + Hacker News) -> BGE embeddings ->
+       |   Chroma vector memory (persistent, shared across sessions)
+       |-- Role Maker (runs in parallel with research) -> AgentManifest
+       |-- AgentFactory -> N generic BaseAgent "ghosts"
+       |-- Ghosts present cases in parallel (tools + blackboard)
+       |-- Judge: rules accept/retry per ghost, retries up to 2 rounds,
+       |   then verdict, then markdown summary
+       |-- Blackboard: in-memory shared memory + SSE event bus per session
+       |-- SQLite: companies, connectors, financial records, session history
+          v
+  [ Google Gemini API serving Gemma models ]
+       hub model (Role Maker, Judge): gemma-4-31b-it
+       specialist model (Router, ghosts): gemma-4-26b-a4b-it (MoE)
+
+Model choice rationale (idea.md): large dense model for reasoning-heavy
+roles, cheaper MoE model for the many specialist calls. Hidden "thinking" is
+enabled only for the Judge to save latency.
+
+Quota plan (flow.md): 3 Gemini API keys from 3 different accounts, rotated
+on 429 errors, one key kept untouched for judging. ~8-12 calls per run.
+(Not implemented yet: the code uses a single key with retry/backoff.)
+
+
+================================================================================
+12. BACKEND: WHAT IS ACTUALLY BUILT  (backend/, Python 3.11+, FastAPI)
+================================================================================
+
+Two entry flows
+  solve_problem(problem_statement)
+    Router decides topic, complexity, needs_web, up to 3 search queries.
+    SIMPLE -> one direct Gemma answer, done.
+    COMPLEX -> the court flow below.
+  revive_startup(url)
+    Scrape the URL (Wayback CDX snapshots + latest snapshot text + Hacker
+    News discussions), store into vector memory, then run the court flow
+    with a fixed question: "What was it, why did it die, should it be
+    revived, and how?"
+
+Court flow (app/agents/orchestrator.py)
+  1. Role Maker starts immediately (parallel with research).
+  2. Web research for each search query; evidence stored in Chroma.
+  3. Top-8 evidence retrieved for the question.
+  4. Ghosts spawned; each presents a case in parallel as strict JSON:
+     {claim, evidence[{fact, source}], confidence, emotion}. A ghost that
+     fails is dropped (event ghost_dropped) instead of killing the session.
+  5. Judge rules on every case: accept, or retry with guidance. Retried
+     ghosts redo their case with the guidance. Up to MAX_JUDGE_RETRIES (2).
+     Unparseable rulings default to accept.
+  6. Judge verdict (decisive answer, which ghosts it rests on, risks).
+  7. Judge writes a markdown summary: question & context, evidence per
+     ghost, rulings, verdict, risks & open questions, next steps.
+  8. Session saved to SQLite (survives restarts).
+  The Judge's persona is a "panchayat / courtroom" judge that weighs
+  evidence, facts and emotions and must not invent facts.
+
+Agent tools (app/services/tools.py + tool_executor.py)
+  web_research        Wikipedia + HN search -> vectorise -> top evidence
+  search_memory       semantic search over the Chroma evidence store
+  scrape_wayback      archived snapshots of a URL
+  rbi_lookup          rule-based RBI FREE-AI check (keyword heuristics:
+                      credit w/o consent, payment w/o audit, AI w/o
+                      explainability)
+  kyc_check           simulated KYC/AML readiness (labelled simulation)
+  fraud_sim           illustrative fraud-risk profile + mitigations
+  deploy_zombie_site  writes a generated landing page to
+                      static/zombie/{slug}.html, served at /zombie/
+  The fintech tools are deliberately simple heuristics, not real
+  regulatory engines.
+
+Supporting pieces
+  gemma_client.py   async google-genai wrapper; function calling; retry on
+                    429/5xx using Google's "retry in Ns" hint, else 5/10/20s
+                    backoff; 4 attempts
+  memory.py         fastembed BAAI/bge-base-en-v1.5 (ONNX, CPU) + Chroma
+                    persistent collection; 200-word chunks, 40-word overlap;
+                    SHA-1 ids for dedup
+  blackboard.py     per-session dict + asyncio queues for SSE; designed to
+                    swap to Redis behind the same interface
+  json_parser.py    robust JSON extraction from model output
+  check_search.py   script to test whether Google Search grounding works
+                    for the Gemma model via the API (open decision)
+
+SSE events emitted: status (pending, routing, scraping, researching,
+role_making, in_court, summarizing, done, error), route, research,
+startup_data, manifest, tool_call, agent_output, ghost_dropped, rulings,
+verdict, summary, error. Keep-alive every 15 s.
+
+Tests (backend/tests, pytest + pytest-asyncio): blackboard (3), db (5),
+json_parser (4), orchestrator (3), role_maker (4), tools (4) = 23 tests.
+
+
+================================================================================
+13. FRONTEND: WHAT IS ACTUALLY BUILT  (frontend/, React 19 + Vite 8)
+================================================================================
+
+Status: untracked in git (new folder). Dependencies: react, react-dom,
+lucide-react (icons). Lint: oxlint. No chart library; charts are custom SVG.
+
+All 5 screens are implemented in src/App.jsx as a step state machine
+(0 Crypt -> 1 Intake -> 2 Assembly -> 3 Courtroom -> 4 Report):
+
+  layout/Header.jsx                    title, ambient audio toggle, reset
+  screen0_crypt/  LifelineCurve, ModeSelector, RelicDropzone, DemoChips
+  screen1_intake/ ExtractedRelics, IntakeStepper
+  screen2_assembly/GhostAssemblyView   sequential card reveal + chime
+  screen3_courtroom/CourtroomStreamView agent states, live log, Inquisitor
+  screen4_report/ VerdictHero, CursedAssumptionCard, ReactiveSandbox,
+                  ScoreBreakdown, ProsConsMatrix, RivalsArena,
+                  TreasuryRunway, PreLaunchChecklist, ActionRoadmap,
+                  CitationsCodex
+  screen4_report/signature/ LaunchPreMortem, GrowThreatRadar,
+                  RescueFlatlineTimeline, ReviveDigitalAutopsy
+  data/modeConfigs.js   names, colours, attack and signature copy per mode
+  data/sampleRuns.js    4 complete saved runs (phone shop, tiffin,
+                        coaching, QuickKart) incl. extracted docs, ghost
+                        team, live logs, Inquisitor attack and full report
+  utils/financialEngine.js, utils/spookyAudio.js
+  styles/design-system.css, index.css, App.css
+
+How it currently behaves
+  - Runs fully offline from sampleRuns.js. There is NO fetch/EventSource
+    call to the backend anywhere in src/.
+  - Mode auto-detect is a client-side keyword match on the pitch text
+    ("shut down"/"died"/"http" -> Revive, "decline"/"loss" -> Rescue,
+    "scale"/"growing" -> Grow, otherwise Launch).
+  - A custom pitch still plays the sample run for the selected mode.
+  - The Reactive Sandbox sliders really recompute the projection and feed
+    the score/verdict back into the Verdict hero.
+  - PreLaunchChecklist uses a hardcoded licence list.
+
+
+================================================================================
+14. DATABASE AND DATA CONNECTORS  (docs/db-and-connectors.md, services/db.py)
+================================================================================
+
+SQLite file backend/data/necromancer.db (gitignored), WAL mode, foreign
+keys on. Chosen over the locally installed PostgreSQL 18 (port 27972,
+password-protected and stopped) because it needs no service or admin
+rights. Migration path to Postgres is documented; db.py function signatures
+stay the same.
+
+Tables
+  companies          id, name, url, created_at
+  connectors         id, company_id, type, label, status, config_json,
+                     created_at, last_synced_at
+  financial_records  id, company_id, connector_id, period ("2026-09"),
+                     revenue, costs, customers, metrics_json, source,
+                     recorded_at   (append-only, so growth over time is
+                     queryable)
+  sessions           id, company_id, mode, status, question, verdict,
+                     summary, error, created_at, updated_at
+
+Connector types: manual (ACTIVE: numbers typed in or CSV parsed
+client-side and posted per row) and, registered as "coming_soon" only:
+bank_statement, upi, pos, tally, gst, google_business_profile. No fake
+integrations are built.
+
+Not wired yet: /api/problem and /api/revive don't take a company_id, so
+the court flow doesn't read financial records yet. No auth on companies.
+
+
+================================================================================
+15. API REFERENCE (current backend)
+================================================================================
+
+  GET  /api/health                              -> {status: ok}
+  POST /api/problem   {problem_statement}       -> {session_id, stream_url}
+  POST /api/revive    {url}                     -> {session_id, stream_url}
+  GET  /api/stream/{session_id}                 SSE event stream
+  GET  /api/session/{session_id}                live state, or SQLite copy
+                                                after a restart
+  POST /api/companies {name, url?}
+  GET  /api/companies/{id}                      profile + connectors +
+                                                financial records
+  POST /api/companies/{id}/connectors {type, label, config?}
+  GET  /api/companies/{id}/connectors
+  POST /api/companies/{id}/financial-records
+       {period, revenue?, costs?, customers?, metrics?, connector_id?}
+  GET  /api/companies/{id}/financial-records    ordered by period
+  GET  /zombie/{slug}.html                      generated landing pages
+
+
+================================================================================
+16. TECH STACK AND SETUP
+================================================================================
+
+Backend : Python 3.11+, FastAPI 0.137, Uvicorn, google-genai 2.9, httpx,
+          BeautifulSoup4, Pydantic 2, python-dotenv, fastembed 0.9,
+          chromadb 1.5, pytest
+Frontend: React 19, Vite 8, lucide-react, oxlint
+AI      : Gemma models via Google AI Studio / Gemini API
+
+Environment (backend/.env, from .env.example)
+  GEMINI_API_KEY, GEMMA_MODEL_HUB=gemma-4-31b-it,
+  GEMMA_MODEL_SPECIALIST=gemma-4-26b-a4b-it,
+  CORS_ORIGINS=http://localhost:3000, MAX_AGENTS=5, MAX_JUDGE_RETRIES=2,
+  HOST, PORT=8000, EMBEDDING_MODEL=BAAI/bge-base-en-v1.5, DB_PATH (optional)
+
+Run
+  python -m venv .venv          (at repo root)
+  .venv/Scripts/pip install -r backend/requirements.txt
+  cp backend/.env.example backend/.env    (fill in the key)
+  cd backend && ../.venv/Scripts/python -m uvicorn app.main:app --reload
+  cd backend && ../.venv/Scripts/python -m pytest
+  cd frontend && npm install && npm run dev
+First memory use downloads the ~200 MB embedding model.
+
+
+================================================================================
+17. DEMO PLAN (3 minutes)
+================================================================================
+
+One mode live (Rescue), the other three as saved runs (~20 s each).
+
+  0:00  Hook: "From idea to afterlife." Show the 4 mode cards.
+  0:15  Drop the phone-shop PDF + sales CSV; Rescue preselected; the
+        "What I learned" card fills itself.
+  0:35  1-2 adaptive questions, pointing at "why I'm asking".
+  0:50  "Watch: Gemma decides what experts this business needs."
+  1:05  Agents research live; "every claim gets a source"; Devil's Advocate.
+  1:30  "Where you're failing" chart -> ranked causes -> the ONE thing.
+  1:45  Drag "EMI partners 1 -> 5": runway and break-even change, verdict
+        turns green.
+  1:50  Launch (saved): pre-mortem + riskiest assumption.
+  2:10  Grow (saved): "How a new entrant would destroy you".
+  2:30  Revive (saved): autopsy + "what's different now".
+  2:45  "Same pipeline, 4 situations, a different team every time." Close.
+
+Moments judges should remember: the PDF fills the profile, the team is
+invented live, "your riskiest assumption is...", dragging the slider flips
+the verdict colour.
+
+Fallback: every sample chip replays its saved run with the same animations.
+
+Original team split (6-hour plan): A = AI/backend (document understanding,
+intake, Role Maker, Devil's Advocate, synthesis); B = agents/data (agent
+runner, key rotation, ROI maths, sample PDFs/CSVs, saved runs); C =
+frontend. Feature freeze at 4:30, rehearse twice, submit early.
+
+Cut order if behind: positioning scatter / market growth chart / risk
+matrix -> moat check and asset detail -> DOCX/PPTX/image upload -> live AI
+follow-ups for Grow/Revive. Never cut: signature sections, saved runs,
+ROI sliders.
+
+
+================================================================================
+18. FUTURE SCOPE AND BUSINESS MODEL  (docs/future-scope.md)
+================================================================================
+
+Vision: "an AI advisory team in every business owner's pocket".
+
+Phase 1 REACH   Mobile app (snap a paper ledger, speak the problem in
+                Hindi, share to WhatsApp), WhatsApp bot, Indian languages,
+                simple mode vs investor mode.
+Phase 2 RETAIN  Monthly health tracking, smart alerts (sales dip, runway,
+                competitor watch, reviews, government schemes), action
+                tracker for the ONE thing and 30/60/90 plan, talk to your
+                agents anytime, plain-language "what if".
+Phase 3 MOAT    Anonymous "businesses like yours" benchmarks (data network
+                effect), bank/NBFC loan packs, investor and incubator
+                integration, government scheme finder (MUDRA, Startup
+                India, state MSME), data connectors (UPI, POS, Tally, GST,
+                Google Business Profile).
+
+Who pays: small-business owners (freemium), founders (pay per deep
+report), banks/NBFCs (per report/API), incubators (per cohort), VCs (per
+portfolio company), CA/accounting firms (per client).
+Pricing hypothesis: Free (1 report/month), Pro Rs 299-499/month, Partner
+(custom). Distribution: CA firms, lenders, incubators/college E-cells,
+WhatsApp sharing, scheme finder as the hook.
+Guardrails: consent first, anonymous benchmarks only, advice not
+decisions, the facts rule stays.
+
+Metrics: reports/week, % via mobile/WhatsApp, % acting on the ONE thing,
+health-score change after 3 months, monthly returning businesses, free->Pro
+conversion.
+
+
+================================================================================
+19. STATUS: SPEC VS. BUILT, GAPS AND INCONSISTENCIES
+================================================================================
+
+Built and working (per code)
+  [x] FastAPI backend with dynamic Role Maker, generic agents, tool calling,
+      Judge court with retries, verdict + summary, SSE streaming
+  [x] Web research (Wikipedia + HN) with persistent vector memory
+  [x] Dead-startup scraper (Wayback + HN)
+  [x] SQLite companies / connectors / financial records / session history
+  [x] 23 backend unit tests
+  [x] Full 5-screen themed frontend with 4 saved demo runs
+  [x] Client-side financial engine with live sliders
+  [x] All 4 signature sections in the UI
+
+Not built yet (in the spec, missing in code)
+  [ ] Frontend <-> backend connection (no API calls, no SSE hook)
+  [ ] The 4 modes in the backend (no `mode` parameter anywhere in the
+      flow; prompts are fintech-oriented)
+  [ ] Document upload and parsing (PDF/CSV) on the backend
+  [ ] Intake: next_question endpoint and adaptive follow-ups
+  [ ] Devil's Advocate as a separate step with mode-specific attacks
+  [ ] Synthesis into the structured report JSON from demo-spec.md (the
+      backend returns a free-text verdict + markdown summary instead)
+  [ ] Per-agent "thinking checklist" JSON (backend uses
+      claim/evidence/confidence/emotion)
+  [ ] Multi-key rotation across 3 API keys
+  [ ] A real web search API (Brave/Tavily) or verified Gemma Google Search
+      grounding (check_search.py exists but the decision is open)
+  [ ] Linking sessions to companies/financial records
+  [ ] Saved runs as public/samples/*.json replaying real SSE sequences
+      (they are a JS module instead)
+
+Inconsistencies worth fixing
+  - Revive: modes.md decided "owner revives their own company, no URL
+    scraping, no zombie site", but the backend still has /api/revive (URL
+    scrape) and deploy_zombie_site, and the frontend placeholder suggests
+    entering "https://shyp.com".
+  - Facts rule vs. content: frontend-spec.md opens with an uncited "42% of
+    startups die because of assumption debt" claim, and sampleRuns.js
+    contains specific statistics (e.g. "78% of mid-range buyers...") and
+    generic citation URLs (e.g. rbi.org.in/bulletin, idc.com/india-tracker)
+    that don't point at real reports. Fine as labelled demo data, but they
+    should be marked as such on screen.
+  - Viability score: spec says 6-dimension weighted formula; code uses a
+    break-even + LTV:CAC heuristic.
+  - CORS default is http://localhost:3000, but Vite's dev server runs on
+    5173, so the frontend will need CORS_ORIGINS updated once it calls the
+    API.
+  - backend/README.md says model defaults are gemma-3-*; config and
+    .env.example default to gemma-4-*.
+  - frontend-spec.md mentions Recharts/Zustand/hooks folders that the
+    actual frontend doesn't use (custom SVG and useState instead).
+  - docs/idea.md describes Next.js + Redis + Postgres; the build uses
+    React/Vite, an in-memory blackboard and SQLite.
+
+Open decisions (from flow.md)
+  - Does Gemma web search work through the API? If not, Gemini for research.
+  - Scope: any business (better demo) or fintech only (sharper compliance)?
+  - Does Gemma accept PDFs via the API? If not, pypdf text extraction.
+  - Final project name (docs use "Startup Analyzer"; code and UI use
+    "Necromancer").
+
+
+================================================================================
+20. FILE MAP
+================================================================================
+
+docs/
+  idea.md                     Stage 1 plan: dead fintech revival, original
+                              architecture, Gemma 4 notes, 24h build plan
+  flow.md                     Stage 2 pipeline, numbers rules, API keys,
+                              demo script, team split, risks, decisions
+  modes.md                    The 4 modes, intake playbooks, phone-shop
+                              worked example, agent checklist, samples
+  demo-spec.md                Every screen, chart and data field; JSON
+                              contract; SSE events; build checklist
+  frontend-spec.md            Cyber-necromantic design system and UI plan
+  db-and-connectors.md        SQLite schema, connectors, company API
+  future-scope.md             Roadmap, business model, metrics, guardrails
+  idea-to-afterlife.html      Visual one-page explainer of the product
+  buisness_target/research.md Handwritten-plan mapping to agent cognition,
+                              assumption-debt framework, viability formula
+  buisness_target/business_failures.md
+                              Early 4-mode concept (Genesis, Competitive
+                              Fortress, Turnaround Surgeon, Resurrection
+                              Engine) + failure case notes
+
+backend/app/
+  main.py, config.py, state.py
+  agents/   orchestrator.py, router.py, role_maker.py, judge.py,
+            base_agent.py, registry.py
+  models/   manifest.py, session.py, blackboard.py
+  routes/   problem.py, revive.py, stream.py, companies.py, health.py
+  services/ gemma_client.py, tools.py, tool_executor.py, memory.py,
+            research.py, scraper.py, blackboard.py, deployer.py, db.py,
+            fintech/{rbi_lookup, kyc_validator, fraud_sim}.py
+  utils/    json_parser.py, logger.py
+backend/tests/   6 test modules, 23 tests
+backend/check_search.py   Gemma search-grounding probe
+
+frontend/src/
+  App.jsx, main.jsx
+  components/layout, screen0_crypt, screen1_intake, screen2_assembly,
+             screen3_courtroom, screen4_report (+ signature/)
+  data/modeConfigs.js, data/sampleRuns.js
+  utils/financialEngine.js, utils/spookyAudio.js
+  styles/design-system.css
+
+================================================================================
+                                   END
+================================================================================

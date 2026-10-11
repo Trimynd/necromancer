@@ -28,3 +28,4 @@ test/
 
 # Vector memory (Chroma)
 backend/data/
+temp/
