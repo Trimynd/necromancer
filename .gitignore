@@ -22,3 +22,9 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+
+# Personal scratch tests
+test/
+
+# Vector memory (Chroma)
+backend/data/

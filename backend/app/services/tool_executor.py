@@ -4,6 +4,8 @@ from app.services.deployer import deploy_zombie_site
 from app.services.fintech.fraud_sim import fraud_sim
 from app.services.fintech.kyc_validator import kyc_check
 from app.services.fintech.rbi_lookup import rbi_lookup
+from app.services.memory import search_memory
+from app.services.research import web_research
 from app.services.scraper import scrape
 from app.utils.logger import get_logger
 
@@ -12,6 +14,8 @@ logger = get_logger(__name__)
 ToolHandler = Callable[..., Awaitable[dict]]
 
 TOOL_HANDLERS: dict[str, ToolHandler] = {
+    "web_research": web_research,
+    "search_memory": search_memory,
     "scrape_wayback": lambda url, limit=5: scrape(url, limit),
     "rbi_lookup": rbi_lookup,
     "kyc_check": kyc_check,

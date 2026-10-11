@@ -4,6 +4,27 @@ Keyed by name so agents can request a subset via `AgentConfig.tools`.
 """
 
 TOOL_REGISTRY: dict[str, dict] = {
+    "web_research": {
+        "name": "web_research",
+        "description": "Search the public web (Wikipedia, Hacker News) for a query, store results in memory, return the best evidence.",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "What to research"}},
+            "required": ["query"],
+        },
+    },
+    "search_memory": {
+        "name": "search_memory",
+        "description": "Semantic search over evidence already collected in memory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "k": {"type": "integer", "default": 6},
+            },
+            "required": ["query"],
+        },
+    },
     "scrape_wayback": {
         "name": "scrape_wayback",
         "description": "Fetch archived snapshots of a dead startup URL from the Wayback Machine.",

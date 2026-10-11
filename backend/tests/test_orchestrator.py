@@ -1,52 +1,105 @@
 import pytest
 
 from app.agents import orchestrator as orchestrator_module
-from app.agents.orchestrator import Orchestrator
+from app.agents.judge import Ruling
+from app.agents.orchestrator import Orchestrator, parse_case
+from app.agents.router import Route
 from app.models.manifest import AgentConfig, AgentManifest
 from app.models.session import SessionState, SessionStatus
 from app.services.blackboard import Blackboard
 
 
-class _FakeAgent:
+class _FakeGhost:
     def __init__(self, agent_id: str):
         self.id = agent_id
-        self.calls = 0
+        self.contexts = []
 
     async def run(self, task, context=None):
-        self.calls += 1
-        if self.id == "hub":
-            return "synthesized decision READY_TO_PITCH" if self.calls > 1 else "final pitch: go for it"
-        return f"{self.id} proposes something"
+        self.contexts.append(context)
+        return f'{{"claim": "{self.id} claim v{len(self.contexts)}", "evidence": [], "confidence": 0.8, "emotion": "calm"}}'
+
+
+class _FakeJudge:
+    def __init__(self):
+        self.rule_calls = 0
+
+    async def rule(self, question, cases):
+        self.rule_calls += 1
+        # send "weak" back once, then accept everything
+        return {
+            gid: Ruling(agent_id=gid, decision="retry" if gid == "weak" and self.rule_calls == 1 else "accept",
+                        guidance="search UPI fraud stats")
+            for gid in cases
+        }
+
+    async def verdict(self, question, cases):
+        return "VERDICT"
+
+    async def summarize(self, question, cases, verdict):
+        return "SUMMARY"
+
+
+async def _no_memory(*args, **kwargs):
+    return []
+
+
+@pytest.fixture
+def court(monkeypatch):
+    manifest = AgentManifest(
+        domain="fintech_problem", problem_summary="t", topology="star", hub_agent="strong",
+        agents=[AgentConfig(id="strong", name="S", system_prompt="x"), AgentConfig(id="weak", name="W", system_prompt="y")],
+    )
+    ghosts = {"strong": _FakeGhost("strong"), "weak": _FakeGhost("weak")}
+
+    async def fake_route(self, q):
+        return Route(complexity="complex", needs_web=False)
+
+    async def fake_manifest(self, q, data=None):
+        return manifest
+
+    monkeypatch.setattr(orchestrator_module.RouterAgent, "route", fake_route)
+    monkeypatch.setattr(orchestrator_module.RoleMakerAgent, "generate_manifest", fake_manifest)
+    monkeypatch.setattr(orchestrator_module.AgentFactory, "create_team", staticmethod(lambda m, b, s: list(ghosts.values())))
+    monkeypatch.setattr(orchestrator_module.memory, "search", _no_memory)
+    return ghosts
 
 
 @pytest.mark.asyncio
-async def test_solve_problem_reaches_done(monkeypatch):
-    manifest = AgentManifest(
-        domain="fintech_problem",
-        problem_summary="test",
-        agents=[
-            AgentConfig(id="hub", name="Hub", system_prompt="x"),
-            AgentConfig(id="peer", name="Peer", system_prompt="y"),
-        ],
-        topology="star",
-        hub_agent="hub",
-        shared_memory_keys=[],
-    )
+async def test_court_sends_back_weak_ghost_then_reaches_verdict(court):
+    orch = Orchestrator(Blackboard())
+    orch.judge = _FakeJudge()
+    session = SessionState(session_id="s1", problem_statement="detect UPI fraud")
 
-    async def fake_generate_manifest(self, problem_statement, startup_data=None):
-        return manifest
+    result = await orch.solve_problem(session)
 
-    def fake_create_team(manifest, blackboard, session_id):
-        return [_FakeAgent("hub"), _FakeAgent("peer")]
+    assert result.status == SessionStatus.DONE, result.error
+    assert result.verdict == "VERDICT" and result.summary == "SUMMARY"
+    assert len(court["strong"].contexts) == 1  # accepted first time
+    assert len(court["weak"].contexts) == 2  # sent back once
+    assert court["weak"].contexts[1]["judge_guidance"] == "search UPI fraud stats"
+    assert result.cases["weak"]["claim"] == "weak claim v2"
 
-    monkeypatch.setattr(orchestrator_module.RoleMakerAgent, "generate_manifest", fake_generate_manifest)
-    monkeypatch.setattr(orchestrator_module.AgentFactory, "create_team", staticmethod(fake_create_team))
 
-    blackboard = Blackboard()
-    session = SessionState(session_id="s1", problem_statement="solve fraud detection")
+@pytest.mark.asyncio
+async def test_simple_question_skips_court(monkeypatch):
+    async def fake_route(self, q):
+        return Route(complexity="simple", needs_web=False)
 
-    result = await Orchestrator(blackboard).solve_problem(session)
+    class _Direct:
+        async def generate(self, **kw):
+            return {"text": "UPI is India's instant payment rail.", "function_calls": []}
+
+    monkeypatch.setattr(orchestrator_module.RouterAgent, "route", fake_route)
+    monkeypatch.setattr(orchestrator_module, "GemmaClient", lambda *a, **k: _Direct())
+    monkeypatch.setattr(orchestrator_module.memory, "search", _no_memory)
+
+    result = await Orchestrator(Blackboard()).solve_problem(SessionState(session_id="s2", problem_statement="what is UPI"))
 
     assert result.status == SessionStatus.DONE
-    assert result.pitch is not None
-    assert result.manifest == manifest
+    assert result.manifest is None
+    assert "UPI" in result.verdict
+
+
+def test_parse_case_handles_prose():
+    assert parse_case("just prose")["claim"] == "just prose"
+    assert parse_case('```json\n{"claim": "x"}\n```')["confidence"] == 0.5

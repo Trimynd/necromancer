@@ -1,6 +1,9 @@
+import asyncio
+import re
 from typing import Any
 
 from google import genai
+from google.genai import errors
 from google.genai import types
 
 from app.config import settings
@@ -11,6 +14,19 @@ logger = get_logger(__name__)
 
 class GemmaAPIError(RuntimeError):
     pass
+
+
+MAX_ATTEMPTS = 3
+_RETRY_RE = re.compile(r"retry in ([\d.]+)s", re.IGNORECASE)
+
+
+def _retry_delay(exc: Exception) -> float:
+    """Free tier is 30 req/min per model; Google's 429 says how long to wait.
+    Anything else retryable (5xx) gets a short pause."""
+    match = _RETRY_RE.search(str(exc))
+    if match:
+        return float(match.group(1)) + 1
+    return 30.0 if getattr(exc, "code", None) == 429 else 5.0
 
 
 def _build_tool(schema: dict) -> types.Tool:
@@ -73,15 +89,25 @@ class GemmaClient:
                 function_calling_config=types.FunctionCallingConfig(mode="AUTO")
             )
 
-        try:
-            response = await self._client.aio.models.generate_content(
-                model=self.model,
-                contents=user_message,
-                config=config,
-            )
-        except Exception as exc:  # google-genai raises various API-specific errors
-            logger.error("Gemma API call failed: %s", exc)
-            raise GemmaAPIError(str(exc)) from exc
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                response = await self._client.aio.models.generate_content(
+                    model=self.model,
+                    contents=user_message,
+                    config=config,
+                )
+                break
+            except errors.APIError as exc:
+                if (exc.code == 429 or exc.code >= 500) and attempt < MAX_ATTEMPTS:
+                    delay = _retry_delay(exc)
+                    logger.warning("%s on %s, retrying in %.0fs (attempt %d)", exc.code, self.model, delay, attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error("Gemma API call failed: %s", exc)
+                raise GemmaAPIError(str(exc)) from exc
+            except Exception as exc:  # network errors etc.
+                logger.error("Gemma API call failed: %s", exc)
+                raise GemmaAPIError(str(exc)) from exc
 
         return {
             "text": response.text or "",

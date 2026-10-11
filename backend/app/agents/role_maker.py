@@ -22,6 +22,7 @@ RULES:
 2. For fintech problems, consider (only include if relevant):
    regulatory compliance (RBI FREE-AI, KYC, AML), fraud/risk, UX, technical feasibility.
 3. Assign tools to each agent ONLY from this registry: {available_tools}
+   (search_memory and web_research are given to every ghost automatically).
 4. Choose a topology: "star" (one hub agent synthesizes everyone else),
    "mesh" (all peers), or "hierarchical".
 5. Exactly one agent's id must match "hub_agent".
@@ -60,7 +61,7 @@ class RoleMakerAgent:
         if startup_data:
             context += f"\n\nDEAD STARTUP DATA:\n{json.dumps(startup_data, indent=2, default=str)}"
 
-        system_prompt = ROLE_MAKER_PROMPT.format(available_tools=list(TOOL_REGISTRY.keys()))
+        system_prompt = ROLE_MAKER_PROMPT.format(available_tools=list(TOOL_REGISTRY.keys()), max_agents=settings.max_agents)
 
         response = await self.gemma.generate(system_prompt=system_prompt, user_message=context, temperature=0.6)
 
