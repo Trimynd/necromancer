@@ -109,6 +109,12 @@ class Orchestrator:
         session.route = route.model_dump()
         await self.blackboard.emit(sid, "route", session.route)
 
+        # Role Maker doesn't need the evidence, so it runs alongside research.
+        manifest_task = (
+            asyncio.create_task(self.role_maker.generate_manifest(question, extra_context))
+            if route.complexity != "simple" else None
+        )
+
         if route.needs_web and route.search_queries:
             await self._status(session, SessionStatus.RESEARCHING)
             results = await asyncio.gather(*(web_research(q) for q in route.search_queries))
@@ -126,14 +132,22 @@ class Orchestrator:
             return
 
         await self._status(session, SessionStatus.ROLE_MAKING)
-        manifest = await self.role_maker.generate_manifest(question, extra_context)
+        manifest = await manifest_task
         session.manifest = manifest
         await self.blackboard.emit(sid, "manifest", manifest.model_dump())
 
         await self._status(session, SessionStatus.IN_COURT)
         ghosts = {g.id: g for g in AgentFactory.create_team(manifest, self.blackboard, sid)}
-        outputs = await asyncio.gather(*(g.run(CASE_TASK, context) for g in ghosts.values()))
-        cases = {gid: parse_case(out) for gid, out in zip(ghosts, outputs)}
+        outputs = await asyncio.gather(*(g.run(CASE_TASK, context) for g in ghosts.values()), return_exceptions=True)
+        # A ghost that still fails after retries leaves the court instead of sinking the session.
+        for gid, out in list(zip(ghosts, outputs)):
+            if isinstance(out, Exception):
+                logger.warning("Ghost %s dropped: %s", gid, out)
+                await self.blackboard.emit(sid, "ghost_dropped", {"agent_id": gid, "error": str(out)})
+                ghosts.pop(gid)
+        if not ghosts:
+            raise RuntimeError("Every ghost failed to present a case")
+        cases = {gid: parse_case(out) for gid, out in zip(ghosts, (o for o in outputs if not isinstance(o, Exception)))}
 
         for attempt in range(settings.max_judge_retries + 1):
             rulings = await self.judge.rule(question, cases)
@@ -148,9 +162,10 @@ class Orchestrator:
             redo = await asyncio.gather(*(
                 ghosts[gid].run(CASE_TASK, {**context, "previous_case": cases[gid], "judge_guidance": rulings[gid].guidance})
                 for gid in sent_back
-            ))
+            ), return_exceptions=True)
             for gid, out in zip(sent_back, redo):
-                cases[gid] = parse_case(out)
+                if not isinstance(out, Exception):  # failed redo keeps the previous case
+                    cases[gid] = parse_case(out)
 
         session.cases = cases
         verdict = await self.judge.verdict(question, cases)

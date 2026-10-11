@@ -41,6 +41,7 @@ class BaseAgent:
 
         tool_results = []
         for call in response.get("function_calls", []):
+            await self.blackboard.emit(self.session_id, "tool_call", {"agent_id": self.id, **call})
             result = await self.tool_executor.execute(call)
             tool_results.append({"call": call, "result": result})
             await self.blackboard.write(self.session_id, self.id, f"tool:{call['name']}", result)
