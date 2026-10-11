@@ -1,17 +1,19 @@
-import { createRoot } from 'react-dom/client';
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import './index.css'
+import { Home, Shell } from './App'
+import { CasePage } from './Case'
 
-import App from './App';
-import { ErrorBoundary } from '@/components/error-boundary';
-
-import './index.css';
-
-createRoot(document.getElementById('root')!, {
-  // Keeps caught errors off reportError(), which would raise the dev overlay.
-  onCaughtError: (error, errorInfo) => {
-    console.error(error, errorInfo.componentStack);
-  },
-}).render(
-  <ErrorBoundary>
-    <App />
-  </ErrorBoundary>,
-);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <BrowserRouter>
+      <Shell>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/case/:id/*" element={<CasePage />} />
+        </Routes>
+      </Shell>
+    </BrowserRouter>
+  </StrictMode>,
+)
