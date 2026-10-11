@@ -77,7 +77,9 @@ async def _acquire_key(start: int, est_tokens: int) -> int:
                 w.append((now, est_tokens))
                 return i
         oldest = min(w[0][0] for w in _windows[:n] if w)
-        await asyncio.sleep(max(0.5, 60 - (now - oldest)))
+        wait = max(0.5, 60 - (now - oldest))
+        logger.info("Pacer: all %d keys at their per-minute limit, waiting %.1fs", n, wait)
+        await asyncio.sleep(wait)
 _RETRY_RE = re.compile(r"retry in ([\d.]+)s", re.IGNORECASE)
 
 

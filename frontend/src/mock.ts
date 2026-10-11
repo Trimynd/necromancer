@@ -1,7 +1,42 @@
+import { statsOf, type Doc, type SheetChange } from './lib'
+
 // A recorded-style run (tiffin service, 3 ghosts, one sent back then accepted), replayed with delays.
 
 export const MOCK_TEXT =
   'I want to start a tiffin service in Pune for college students at ₹2500/month. Two meals a day, home-style food. Is this a good idea?'
+
+// "Use a sample sheet": a phone shop's monthly numbers, falling since March (same shape as the sheet connector returns).
+const SHEET_TABLE = {
+  columns: ['month', 'revenue_inr', 'footfall', 'avg_ticket_inr'],
+  rows: [
+    ['Jan 2026', 1840000, 2300, 800], ['Feb 2026', 1925000, 2350, 819], ['Mar 2026', 1980000, 2400, 825], ['Apr 2026', 1610000, 2050, 785],
+    ['May 2026', 1390000, 1850, 751], ['Jun 2026', 1210000, 1680, 720], ['Jul 2026', 1060000, 1540, 688], ['Aug 2026', 980000, 1450, 676],
+  ],
+}
+export const MOCK_SHEET: Doc = {
+  id: 'mock-sheet', name: 'Phone shop – monthly sales', kind: 'sheet', chars: 412, pages: null,
+  table: SHEET_TABLE, stats: statsOf(SHEET_TABLE),
+}
+
+// "I updated my sheet": September came in and sales bounced back (version 2, one more row).
+const SHEET_V2_TABLE = { ...SHEET_TABLE, rows: [...SHEET_TABLE.rows, ['Sep 2026', 1350000, 1760, 767]] }
+export const MOCK_SHEET_V2: Doc = { ...MOCK_SHEET, version: 2, table: SHEET_V2_TABLE, stats: statsOf(SHEET_V2_TABLE) }
+/** Same shape as the backend's `data_changed` sheet entry, computed from the two versions. */
+const diff = (a: Doc, b: Doc): SheetChange => {
+  const sa = a.stats ?? {}, sb = b.stats ?? {}
+  const cols = Object.keys(sb).filter((c) => sa[c])
+  return {
+    name: b.name, version_before: a.version ?? 1, version_after: b.version ?? 2,
+    columns: cols.map((c) => ({
+      column: c, before: sa[c].last, after: sb[c].last,
+      change_pct: sa[c].last ? Math.round(((sb[c].last - sa[c].last) / Math.abs(sa[c].last)) * 1000) / 10 : null,
+      trend_before: sa[c].recent_trend, trend_after: sb[c].recent_trend,
+    })),
+    added_columns: Object.keys(sb).filter((c) => !sa[c]), removed_columns: Object.keys(sa).filter((c) => !sb[c]),
+    rows_before: a.table?.rows.length ?? 0, rows_after: b.table?.rows.length ?? 0, changed: true,
+  }
+}
+export const MOCK_DATA_CHANGED = { sheets: [diff(MOCK_SHEET, MOCK_SHEET_V2)] }
 
 const g = {
   arjun: { id: 'arjun', name: 'Arjun, the Budget Student' },
@@ -55,8 +90,67 @@ Demand is real, but ₹2500/month for two meals a day sits above what most hoste
 | Company | Listed | Market cap | Revenue (TTM) | Status signal |
 |---|---|---|---|---|
 | Swiggy | SWIGGY.NS (NSI) | 613.6B INR | 249.0B INR | ⚠️ [Swiggy shuts down a standalone quick-food app](https://news.google.com/) (19 Feb 2026) |
-| Zomato (Eternal) | ETERNAL.NS (NSI) | 2.1T INR | 202.4B INR | No shutdown news |
+| Zomato (Eternal) | ETERNAL.NS (NSI) | 2.1T INR | 202.4B INR | ✓ No shutdown news |
+⚠️ = a news headline mentions a shutdown or halt; check the link. ✓ = no shutdown news found.
 `
+
+const SCORES = {
+  overall: 58, label: 'PIVOT',
+  dimensions: { 'Market demand': 8, Competition: 5, 'Unit economics': 4, 'Regulation & risk': 7, Execution: 6 },
+  plain: {
+    verdict_in_plain_words: 'Students do want this, but ₹2500 a month is too much for most of them. Start smaller and cheaper, then grow.',
+    what_this_means:
+      'Begin with lunch only at around ₹1500 a month near one college. Let students pause during exams and holidays so they don’t cancel. Add dinner only after 120 students are paying every month.',
+    confidence_in_plain_words:
+      'The council is fairly sure (78%) because three experts agreed on the price problem using real mess prices from Pune. The cost numbers come partly from your own cost sheet, so check them with a week of real bills.',
+    dimension_notes: {
+      'Market demand': 'Lots of students in Pune want cheap, home-style food.',
+      Competition: 'College messes and Swiggy/Zomato offers are already cheap and easy.',
+      'Unit economics': 'At ₹2500 few will sign up; at ₹1500 you need many students to make money.',
+      'Regulation & risk': 'Only a basic FSSAI food licence is needed. Low legal risk.',
+      Execution: 'Cooking and delivering on time every day is hard but doable on one route.',
+    },
+  },
+}
+
+const PLAN = {
+  horizon_days: 90,
+  goal: 'Get 120 students paying every month for a lunch-only tiffin near one Pune college.',
+  first_step_this_week: 'Talk to 20 students outside one college in Kothrud and ask what they pay for food today and what they would pay you.',
+  phases: [
+    { name: 'Test the idea', start_week: 1, end_week: 3 },
+    { name: 'Start small', start_week: 4, end_week: 8 },
+    { name: 'Grow carefully', start_week: 9, end_week: 13 },
+  ],
+  tasks: [
+    { id: 't1', title: 'Talk to 20 students at one college', phase: 'Test the idea', start_week: 1, end_week: 1, owner: 'Founder',
+      why: 'Find out the real price they will pay before you cook anything.', success_metric: '20 conversations, a price most say yes to', depends_on: [] },
+    { id: 't2', title: 'Check food cost with one week of real bills', phase: 'Test the idea', start_week: 1, end_week: 2, owner: 'Founder',
+      why: 'Your cost sheet says ₹48 a meal. Make sure it is true.', success_metric: 'Real cost per meal written down', depends_on: [] },
+    { id: 't3', title: 'Run a 2-week lunch pilot with 30 students', phase: 'Test the idea', start_week: 2, end_week: 3, owner: 'Founder + cook',
+      why: 'See if students like the food and stay.', success_metric: '20 of 30 want to continue', depends_on: ['t1', 't2'] },
+    { id: 't4', title: 'Get FSSAI registration', phase: 'Start small', start_week: 3, end_week: 5, owner: 'Founder',
+      why: 'You need it to sell food legally.', success_metric: 'Registration certificate in hand', depends_on: [] },
+    { id: 't5', title: 'Launch lunch plan at ₹1500/month with pause days', phase: 'Start small', start_week: 4, end_week: 8, owner: 'Founder',
+      why: 'Pause days stop students cancelling during exams and holidays.', success_metric: '60 paying students', depends_on: ['t3'] },
+    { id: 't6', title: 'Fix one delivery route around the college', phase: 'Start small', start_week: 4, end_week: 6, owner: 'Delivery partner',
+      why: 'One tight route keeps delivery near ₹8 a meal.', success_metric: 'All lunches delivered by 1 pm', depends_on: ['t5'] },
+    { id: 't7', title: 'Ask happy students to bring friends', phase: 'Grow carefully', start_week: 9, end_week: 12, owner: 'Founder',
+      why: 'Word of mouth is the cheapest way to find students.', success_metric: '120 paying students', depends_on: ['t5'] },
+    { id: 't8', title: 'Try dinner with 20 students', phase: 'Grow carefully', start_week: 11, end_week: 13, owner: 'Founder + cook',
+      why: 'Add dinner only once lunch makes money.', success_metric: 'Dinner covers its own cost', depends_on: ['t7'] },
+  ],
+  review: {
+    strengths: ['Students really want cheap home-style food.', 'Your food cost (₹48 a meal) looks low enough to make money.', 'Pune has many colleges close together.'],
+    risks: ['Students leave during exams and holidays.', 'Mess food at ₹1800–2200 is cheaper than your plan.', 'Food quality can slip as you grow.'],
+    stop_doing: ['Stop planning for 400 students by month 6. Aim for 120 first.', 'Don’t start with two meals a day.', 'Don’t rent a big kitchen before the pilot works.'],
+  },
+  suggested_followups: [
+    'Would a ₹1500 lunch-only plan still break even at 120 students?',
+    'How do I stop students cancelling during exams and holidays?',
+    'Which Kothrud college should I pilot at first, and why?',
+  ],
+}
 
 const chunks = REPORT.match(/[\s\S]{1,60}/g) ?? []
 
@@ -136,8 +230,10 @@ const ALL: Ev[] = [
     meera: { decision: 'accept', reason: 'Now gives a break-even figure with sourced costs.', search_quality: 0.75, missing_sources: [], needs_more: null, guidance: '' },
   } }],
   [400, 'status', 'summarizing'],
-  ...chunks.map((c, i): Ev => [i === 0 ? 3000 : 90, 'report_chunk', c]),
-  [300, 'scores', { overall: 58, label: 'PIVOT', dimensions: { 'Market demand': 8, Competition: 5, 'Unit economics': 4, 'Regulation & risk': 7, Execution: 6 } }],
+  // Scores and the plan arrive early, before (and while) the report streams.
+  [1200, 'scores', SCORES],
+  [900, 'plan', PLAN],
+  ...chunks.map((c, i): Ev => [i === 0 ? 1200 : 90, 'report_chunk', c]),
   [600, 'verdict', REPORT.split('## 2.')[0].replace('## 1. Verdict\n', '')],
   [100, 'summary', REPORT],
   [100, 'usage', { 'gemma-3-27b': { calls: 11, input: 48210, output: 6120, thinking: 0 } }],
@@ -146,17 +242,29 @@ const ALL: Ev[] = [
 ]
 
 /** Replays the mock run into `emit`. Returns a cancel function. */
-export function playMock(emit: (event: string, data: unknown) => void, opts: { url?: string } = {}): () => void {
+export function playMock(
+  emit: (event: string, data: unknown) => void,
+  opts: { url?: string; sheet?: boolean; interrupted?: boolean; dataUpdate?: boolean } = {},
+): () => void {
+  let base = ALL
+  const sheet = opts.dataUpdate ? MOCK_SHEET_V2 : MOCK_SHEET
+  if (opts.sheet || opts.dataUpdate)
+    base = base.flatMap((e): Ev[] => e[1] !== 'documents' ? [e] : [
+      [e[0], 'documents', { items: [...(e[2] as { items: Doc[] }).items, sheet] }],
+      ...(opts.dataUpdate ? [[300, 'data_changed', MOCK_DATA_CHANGED] as Ev] : []),
+    ])
+  // Server restarted mid-court: everything up to the first rulings, then status "interrupted".
+  if (opts.interrupted) base = [...base.slice(0, base.findIndex((e) => e[1] === 'rulings') + 1), [1500, 'status', 'interrupted']]
   // With a website, the court reads it first (url + prompt are sent together).
   const host = opts.url?.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
-  const EVENTS: Ev[] = !opts.url ? ALL : [
-    ALL[0],
+  const EVENTS: Ev[] = !opts.url ? base : [
+    base[0],
     [400, 'status', 'scraping'],
     [1500, 'startup_data', {
       latest_snapshot: { title: host, description: `Archived homepage of ${host}, last captured before it went quiet.`, snapshot_url: `https://web.archive.org/web/2024/${opts.url}` },
       hn_discussions: [{ title: `Ask HN: What happened to ${host}?`, hn_url: 'https://news.ycombinator.com/' }],
     }],
-    ...ALL.slice(1),
+    ...base.slice(1),
   ]
   let cancelled = false
   let timer: ReturnType<typeof setTimeout>

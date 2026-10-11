@@ -22,3 +22,14 @@ def test_upload_rejects_unsupported_type():
 def test_problem_rejects_unknown_document_id():
     r = client.post("/api/problem", json={"problem_statement": "my shop", "document_ids": ["nope"]})
     assert r.status_code == 400 and "Unknown document ids" in r.json()["detail"]
+
+
+def test_sheet_connector_rejects_non_sheet_links():
+    r = client.post("/api/connectors/google-sheet", json={"url": "https://example.com/not-a-sheet"})
+    assert r.status_code == 400 and "Google Sheets link" in r.json()["detail"]
+
+
+def test_csv_upload_returns_table_and_code_stats():
+    r = client.post("/api/documents", files={"files": ("s.csv", b"month,revenue\nJan,100\nFeb,50\n", "text/csv")})
+    doc = r.json()["documents"][0]
+    assert doc["table"]["rows"][1] == ["Feb", 50.0] and doc["stats"]["revenue"]["change_pct"] == -50.0

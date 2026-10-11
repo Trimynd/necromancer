@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { compareWorkbooks, saveRecent, startCase, type Comparison } from './lib'
+import { compareWorkbooks, saveRecent, sheetAsFile, startCase, type Comparison } from './lib'
 
 const MAX_FILES = 6
 const MAX_MB = 5
@@ -57,6 +57,27 @@ export function ComparePage() {
   const [depth, setDepth] = useState<'fast' | 'deep'>('fast')
   const [trialBusy, setTrialBusy] = useState(false)
   const resultsRef = useRef<HTMLDivElement>(null)
+  const [sheetUrl, setSheetUrl] = useState('')
+  const [sheetBusy, setSheetBusy] = useState(false)
+
+  // Google Sheets connector: the backend reads the shared sheet as CSV; it then joins the list like any upload.
+  const addSheet = async () => {
+    const u = sheetUrl.trim()
+    if (!/^https:\/\/docs\.google\.com\/spreadsheets\//.test(u)) { setErr('Paste a Google Sheets link (https://docs.google.com/spreadsheets/…).'); return }
+    if (files.length >= MAX_FILES) { setErr(`Up to ${MAX_FILES} files, please.`); return }
+    setSheetBusy(true)
+    setErr('')
+    try {
+      const f = await sheetAsFile(u)
+      setFiles((cur) => [...cur, f].slice(0, MAX_FILES))
+      setSheetUrl('')
+      setResult(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSheetBusy(false)
+    }
+  }
 
   useEffect(() => { document.title = 'Compare ledgers · Necromancer' }, [])
 
@@ -196,12 +217,29 @@ export function ComparePage() {
               XLSX or CSV · up to {MAX_FILES} files, {MAX_MB} MB each · one row per period, with columns like Revenue, Expenses, Net Profit, Customers.
             </p>
 
+            <div className="mt-3 border-t border-hair pt-3">
+              <label htmlFor="sheet-url" className="font-medium"><span aria-hidden>📗</span> Or add a Google Sheet</label>
+              <div className="mt-1 flex flex-wrap gap-2">
+                <input
+                  id="sheet-url" type="url" className="field min-w-0 flex-1 !py-1.5" placeholder="https://docs.google.com/spreadsheets/d/…"
+                  value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSheet() } }}
+                />
+                <button type="button" className="btn btn-line !px-3 !py-1" onClick={addSheet} disabled={sheetBusy || !sheetUrl.trim()}>
+                  {sheetBusy ? 'Reading…' : 'Add sheet'}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-ink-soft">
+                Share it first: <b>Share</b> → General access → <b>Anyone with the link</b> → <b>Viewer</b>. Add a <code>#gid=…</code> link to pick a tab.
+              </p>
+            </div>
+
             {files.length > 0 && (
               <ol className="mt-3 space-y-1.5" aria-label="Files to compare, oldest first">
                 {files.map((f, i) => (
                   <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-md bg-sheet px-3 py-2">
                     <span className="w-5 text-xs text-ink-soft tabular-nums">{i + 1}.</span>
-                    <span aria-hidden>📗</span>
+                    <span aria-hidden>{f.name.toLowerCase().endsWith('.csv') ? '📊' : '📒'}</span>
                     <span className="min-w-0 flex-1 truncate">{f.name}</span>
                     <span className="shrink-0 text-xs text-ink-soft">{fmtSize(f.size)}</span>
                     <button type="button" aria-label={`Move ${f.name} earlier`} disabled={i === 0} onClick={() => move(i, -1)} className="px-1 text-ink-soft hover:text-ink disabled:opacity-30">↑</button>

@@ -35,8 +35,11 @@ class _FakeSoulBinder:
             for gid in cases
         }
 
-    async def score(self, question, cases):
-        return {"label": "GO", "dimensions": {"Market demand": 8.0}, "overall": 80}
+    async def score(self, question, cases, stage=None):
+        return {"label": "GO", "dimensions": {"Market demand": 8.0}, "overall": 80, "plain": {}}
+
+    async def plan(self, question, cases, stage=None):
+        return {"goal": "g", "tasks": [{"id": "t1", "title": "pilot", "start_week": 1, "end_week": 2}]}
 
     async def report(self, question, cases):
         for chunk in ["## 1. Verdict\nGO 80", "\n## 2. Question\nctx"]:
@@ -99,6 +102,7 @@ async def test_court_sends_back_weak_ghost_then_reaches_verdict(court):
     events = [e.event for e in orch.blackboard._history["s1"]]
     assert events[-1] == "status" and events.index("usage") < len(events) - 1  # usage reaches the UI before "done"
     assert result.scores["overall"] == 80 and events.index("scores") < events.index("verdict")
+    assert result.plan["tasks"][0]["title"] == "pilot" and "plan" in events
 
 
 @pytest.mark.asyncio

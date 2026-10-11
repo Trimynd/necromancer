@@ -30,7 +30,10 @@ async def get_events(session_id: str) -> dict:
     saved = history.load(session_id)
     if saved is None:
         raise HTTPException(status_code=404, detail="Unknown session_id")
-    return {"status": saved["session"].get("status"), "events": saved["events"]}
+    status = saved["session"].get("status")
+    if status not in ("done", "error"):
+        status = "interrupted"  # saved mid-run, and this process no longer runs it
+    return {"status": status, "events": saved["events"]}
 
 
 @router.get("/api/stream/{session_id}")
@@ -40,9 +43,11 @@ async def stream(session_id: str, request: Request) -> StreamingResponse:
         if saved is None:
             raise HTTPException(status_code=404, detail="Unknown session_id")
 
-        async def replay():  # finished run from disk: send it all at once, then close
+        async def replay():  # run from disk: send it all at once, then close
             for e in saved["events"]:
                 yield f"event: {e['event']}\ndata: {json.dumps(e['data'], default=str)}\n\n"
+            if saved["session"].get("status") not in ("done", "error"):
+                yield 'event: status\ndata: "interrupted"\n\n'
 
         return StreamingResponse(replay(), media_type="text/event-stream")
 

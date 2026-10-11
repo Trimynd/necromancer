@@ -152,6 +152,29 @@ class Orchestrator:
 
         return await self._guard(session, flow())
 
+    def _save(self, session: SessionState) -> None:
+        try:
+            history.save(session.session_id, session.model_dump(mode="json"), self.blackboard.history(session.session_id))
+        except Exception as exc:  # history is a convenience; never fail a run over it
+            logger.warning("Saving history failed for %s: %s", session.session_id, exc)
+
+    async def _autosave(self, session: SessionState, every: float = 3.0) -> None:
+        """Write progress to disk while the run is live, so a backend restart mid-run leaves an
+        'interrupted' case the user can still open (and re-run), instead of 'case not found'."""
+        while True:
+            await asyncio.sleep(every)
+            await asyncio.to_thread(self._save, session)
+
+    async def _emit_when_ready(self, session: SessionState, event: str, coro) -> None:
+        """Run an insight call and send its result straight away; a failure never blocks the report."""
+        try:
+            result = await coro
+        except Exception as exc:
+            logger.warning("%s failed: %s", event, exc)
+            return
+        setattr(session, event, result)
+        await self.blackboard.emit(session.session_id, event, result)
+
     async def _pre_research(self, ghost, manifest, question: str) -> list[dict]:
         """Run the searches the Role Maker planned for this ghost, tagged as the ghost's evidence."""
         plan = next((a.research for a in manifest.agents if a.id == ghost.id), None) or [
@@ -173,6 +196,7 @@ class Orchestrator:
         call_log.set(calls)
         memory.evidence_tag.set({"session_id": session.session_id, "round": 0,
                                  "scope": [session.session_id, *(session.prior_context or {}).get("session_ids", [])]})
+        autosave = asyncio.create_task(self._autosave(session))
         try:
             await flow
         except Exception as exc:
@@ -187,10 +211,8 @@ class Orchestrator:
             # Last event: the stream closes on "done", so usage/call_log must go out before it.
             await self.blackboard.emit(session.session_id, "status", session.status)
 
-        try:
-            history.save(session.session_id, session.model_dump(mode="json"), self.blackboard.history(session.session_id))
-        except Exception as exc:  # history is a convenience; never fail a finished run over it
-            logger.warning("Saving history failed for %s: %s", session.session_id, exc)
+        autosave.cancel()
+        self._save(session)
         await db.save_session(
             session.session_id, status=session.status, question=session.problem_statement or session.input_url,
             verdict=session.verdict, summary=session.summary, error=session.error,
@@ -202,6 +224,10 @@ class Orchestrator:
         if session.prior_context:
             # Follow-up turn: the council starts from what the earlier case concluded.
             extra_context = {**(extra_context or {}), "earlier_in_this_conversation": session.prior_context}
+        if session.data_diff:
+            # The owner's numbers changed since the last verdict: say what moved (exact, from code).
+            await self.blackboard.emit(sid, "data_changed", {"sheets": session.data_diff})
+            extra_context = {**(extra_context or {}), "numbers_changed_since_last_verdict": session.data_diff}
         session.route = route.model_dump()
         await self.blackboard.emit(sid, "route", session.route)
 
@@ -209,7 +235,7 @@ class Orchestrator:
             # The user's own documents are first-class evidence: tagged "document", stored for this
             # session (so ghosts' searches and the Soul Binder's window find them) and briefed directly.
             await self.blackboard.emit(sid, "documents", {"items": [
-                {k: d.get(k) for k in ("id", "name", "kind", "chars", "pages")} for d in session.document_texts
+                {k: v for k, v in d.items() if k not in ("text", "preview")} for d in session.document_texts
             ]})
             await memory.add([{"text": d["text"], "title": d["name"], "source": f"upload:{d['name']}",
                                "source_type": "document"} for d in session.document_texts])
@@ -302,7 +328,10 @@ class Orchestrator:
             await self.blackboard.emit(sid, "window", {"round": attempt, "chunks": len(window),
                                                        "by_source": Counter(e["source_type"] for e in window)})
             # Fast mode: rulings without hidden thinking (~45-58s -> a few seconds).
-            rulings = await self.soul_binder.rule(question, cases, window, think=not fast, strict=session.strict)
+            # Deep thinks hard on the first ruling; re-rulings only check redos against known guidance,
+            # so they skip hidden thinking (each thinking pass cost ~25-45s).
+            rulings = await self.soul_binder.rule(question, cases, window, think=not fast and attempt == 0,
+                                                  strict=session.strict)
             await self.blackboard.emit(sid, "rulings", {"attempt": attempt, "rulings": {k: r.model_dump() for k, r in rulings.items()}})
             for gid, r in rulings.items():
                 cases[gid]["ruling"] = r.model_dump(exclude={"agent_id"})
@@ -328,7 +357,12 @@ class Orchestrator:
         session.cases = cases
         await self._status(session, SessionStatus.SUMMARIZING)
         # Scores (for the dashboard gauge/radar) are a small separate call that runs while the report streams.
-        scores_task = asyncio.create_task(self.soul_binder.score(question, cases))
+        # Scores (+ plain words) and the 90-day plan are separate small calls that start now and are
+        # sent the moment each is ready, so the dashboard fills while the report is still streaming.
+        insight_tasks = [
+            asyncio.create_task(self._emit_when_ready(session, "scores", self.soul_binder.score(question, cases, session.stage))),
+            asyncio.create_task(self._emit_when_ready(session, "plan", self.soul_binder.plan(question, cases, session.stage))),
+        ]
         parts: list[str] = []
         async for chunk in self.soul_binder.report(question, cases):
             parts.append(chunk)
@@ -336,16 +370,12 @@ class Orchestrator:
         session.summary = "".join(parts)
         # Listing + alive/dead status of every competitor comes from code (Yahoo Finance, Google News),
         # never from the model: it had called ZestMoney (shut Dec 2023) an active competitor.
-        extra = companies_markdown(await verify_companies(session.summary))
+        extra = companies_markdown(await verify_companies(session.summary, question))
         if extra:
             session.summary += extra
             await self.blackboard.emit(sid, "report_chunk", extra)
         session.verdict = extract_verdict(session.summary)
-        try:
-            session.scores = await scores_task
-            await self.blackboard.emit(sid, "scores", session.scores)
-        except Exception as exc:  # the report is the product; a failed score never blocks it
-            logger.warning("Scoring failed: %s", exc)
+        await asyncio.gather(*insight_tasks)
         await self.blackboard.emit(sid, "verdict", session.verdict)
         await self.blackboard.emit(sid, "summary", session.summary)
         session.status = SessionStatus.DONE  # announced by _guard, after usage

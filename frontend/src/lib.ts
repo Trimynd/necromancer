@@ -2,7 +2,7 @@
 
 export type Status =
   | 'pending' | 'routing' | 'scraping' | 'researching' | 'role_making'
-  | 'in_court' | 'summarizing' | 'done' | 'error'
+  | 'in_court' | 'summarizing' | 'done' | 'error' | 'interrupted'
 
 export interface Route { topic: string; complexity: 'simple' | 'complex'; needs_web: boolean; search_queries: string[] }
 export interface ResearchRow { query: string; chunks_stored: number; per_source?: Record<string, number> }
@@ -37,8 +37,69 @@ export interface Ghost {
   roundSearches?: string[][]
   persona?: string
 }
-export interface Doc { id: string; name: string; kind: string; chars?: number; pages?: number | null; preview?: string }
-export interface Scores { overall: number; label?: string; dimensions?: Record<string, number> }
+export interface ColStat {
+  first: number; last: number; min: number; max: number; change_pct: number | null; trend: 'up' | 'down' | 'flat'
+  /** Over the last 3 rows only. */
+  recent_change_pct?: number | null; recent_trend?: 'up' | 'down' | 'flat'
+}
+export interface Table { columns: string[]; rows: (string | number)[][] }
+export interface Doc {
+  id: string; name: string; kind: string; chars?: number; pages?: number | null; preview?: string
+  /** csv / sheet only: the parsed table (≤ 200 rows, header excluded) and per-numeric-column stats. */
+  table?: Table; stats?: Record<string, ColStat>
+  /** sheet only: the link it was read from, and 1, 2, 3… each time it is re-read after an edit. */
+  source?: string; version?: number
+}
+/** One column's before/after in a `data_changed` event. */
+export interface ColChange {
+  column: string; before: number | null; after: number | null; change_pct: number | null
+  trend_before?: ColStat['trend']; trend_after?: ColStat['trend']
+}
+export interface SheetChange {
+  name: string; version_before: number; version_after: number; columns: ColChange[]
+  added_columns: string[]; removed_columns: string[]; rows_before: number; rows_after: number; changed: boolean
+  /** Set when a file was swapped for a new one (update-data): the file it replaced. */
+  previous_name?: string
+  /** Every changed cell, and how the code-computed verdict moved (spreadsheets only). */
+  cells?: LedgerDiff['cells']
+  verdict?: LedgerDiff['verdict']
+}
+/** Same shape the backend sends: stats for every column whose cells are all numbers. */
+export function statsOf(t: Table): Record<string, ColStat> {
+  const out: Record<string, ColStat> = {}
+  t.columns.forEach((c, i) => {
+    const raw = t.rows.map((r) => r[i]).filter((v) => v !== '' && v != null)
+    const xs = raw.map((v) => (typeof v === 'number' ? v : Number(String(v).replace(/[,₹$%\s]/g, ''))))
+    if (!xs.length || xs.some((x) => !Number.isFinite(x))) return
+    const first = xs[0], last = xs[xs.length - 1], r0 = xs[Math.max(0, xs.length - 3)]
+    const pct = (a: number) => (a ? Math.round(((last - a) / Math.abs(a)) * 1000) / 10 : null)
+    const trend = (p: number | null) => (p == null || Math.abs(p) < 1 ? 'flat' : p > 0 ? 'up' : 'down') as ColStat['trend']
+    const change_pct = pct(first), recent_change_pct = pct(r0)
+    out[c] = { first, last, min: Math.min(...xs), max: Math.max(...xs), change_pct, trend: trend(change_pct),
+      recent_change_pct, recent_trend: trend(recent_change_pct) }
+  })
+  return out
+}
+export interface Plain {
+  verdict_in_plain_words?: string
+  what_this_means?: string
+  confidence_in_plain_words?: string
+  dimension_notes?: Record<string, string>
+}
+export interface Scores { overall?: number; label?: string; dimensions?: Record<string, number>; plain?: Plain }
+export interface PlanTask {
+  id?: string; title?: string; phase?: string; start_week?: number; end_week?: number
+  owner?: string; why?: string; success_metric?: string; depends_on?: string[]
+}
+export interface Plan {
+  horizon_days?: number; goal?: string; first_step_this_week?: string
+  phases?: { name?: string; start_week?: number; end_week?: number }[]
+  tasks?: PlanTask[]
+  review?: { strengths?: string[]; risks?: string[]; stop_doing?: string[] }
+  /** Three questions specific to this case, for the follow-up box. */
+  suggested_followups?: string[]
+}
+export type Stage = 'launch' | 'grow' | 'rescue' | 'revive'
 export interface Usage { [model: string]: { calls?: number; input?: number; output?: number; thinking?: number } }
 
 export interface CaseState {
@@ -58,6 +119,11 @@ export interface CaseState {
   calls?: number
   documents?: Doc[]
   scores?: Scores
+  plan?: Plan
+  /** Re-analysis after the user edited their Google Sheet: what changed, per sheet. */
+  dataChanged?: SheetChange[]
+  /** Run length in seconds, from the recorded event times (finished runs only). */
+  duration?: number
   error?: string
 }
 
@@ -111,7 +177,7 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
       const next = { ...s, status: d as Status }
       if (d === 'in_court') next.ghosts = s.ghosts.map((g) => (g.phase === 'spawned' ? { ...g, phase: 'researching' } : g))
       // Fast mode never redoes: a sent-back ghost just stays sent back.
-      if (d === 'summarizing' || d === 'done')
+      if (d === 'summarizing' || d === 'done' || d === 'interrupted')
         next.ghosts = next.ghosts.map((g) => (g.phase === 'redoing' ? { ...g, phase: 'sent_back' } : g))
       return next
     }
@@ -174,10 +240,14 @@ export function reduce(s: CaseState, event: string, d: any): CaseState {
       }
       return next
     }
+    case 'data_changed':
+      return { ...s, dataChanged: d?.sheets ?? [] }
     case 'documents':
       return { ...s, documents: d?.items ?? d }
     case 'scores':
-      return { ...s, scores: d }
+      return d && typeof d === 'object' ? { ...s, scores: d } : s
+    case 'plan':
+      return d && typeof d === 'object' ? { ...s, plan: d } : s
     case 'report_chunk':
       return { ...s, report: s.report + String(d) }
     case 'summary':
@@ -226,6 +296,7 @@ export function fromSnapshot(snap: any): CaseState {
     report: snap.summary ?? '',
     documents: snap.documents ?? undefined,
     scores: snap.scores ?? undefined,
+    plan: snap.plan ?? undefined,
     verdict: snap.verdict ?? undefined,
     usage: snap.usage ?? undefined,
     error: snap.error ?? undefined,
@@ -269,7 +340,7 @@ export const sumSources = (rows?: { per_source?: Record<string, number>; chunks_
 
 // ---- recent cases (localStorage) ----
 export interface Recent {
-  id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean
+  id: string; title: string; text?: string; url?: string; depth?: string; at: number; verdict?: string; document_ids?: string[]; strict?: boolean; stage?: Stage
   /** Follow-ups: the case this one continues, and the first case of the thread. */
   parent?: string; root?: string
 }
@@ -287,8 +358,12 @@ export function patchRecent(id: string, patch: Partial<Recent>) {
   if (found) saveRecent({ ...found, ...patch })
 }
 
-export const isMock = () =>
-  import.meta.env.VITE_USE_MOCK === 'true' || new URLSearchParams(location.search).get('mock') === '1'
+const mockParam = () => new URLSearchParams(location.search).get('mock')
+export const isMock = () => import.meta.env.VITE_USE_MOCK === 'true' || mockParam() === '1' || mockParam() === 'interrupted'
+/** ?mock=interrupted plays a run that stops mid-court, as after a server restart. */
+export const mockInterrupted = () => mockParam() === 'interrupted'
+/** Query string that keeps the current mock variant across navigation. */
+export const mockQ = () => (isMock() ? `?mock=${mockParam() ?? '1'}` : '')
 
 /** POST /api/documents (multipart, field "files"). Throws with the server's `detail` on 400. */
 export async function uploadDocuments(files: File[]): Promise<Doc[]> {
@@ -304,11 +379,21 @@ export async function uploadDocuments(files: File[]): Promise<Doc[]> {
   return (await res.json()).documents ?? []
 }
 
+/** POST /api/connectors/google-sheet -> the sheet as a document. Throws with the server's `detail` on 400. */
+export async function connectSheet(url: string): Promise<Doc[]> {
+  const res = await fetch('/api/connectors/google-sheet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) })
+  if (!res.ok) {
+    let detail: unknown = `Couldn't connect the sheet (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  return (await res.json()).documents ?? []
+}
+
 export const kindOf = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : ext === 'xlsx' || ext === 'xlsm' ? 'excel' : 'text'
 }
-export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx: '📘', excel: '📗', text: '📄' }
 
 // ---------- Excel compare (POST /api/compare): verdicts computed in code, plus cell diffs ----------
 
@@ -355,14 +440,19 @@ export async function compareWorkbooks(files: File[]): Promise<Comparison> {
   }
   return res.json()
 }
+export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', excel: '📒', docx: '📘', text: '📄' }
+export const docLabel = (d: Doc) =>
+  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : d.kind === 'excel' ? 'Excel · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
+    : d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''
 
-export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean }): Promise<string> {
+export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean; stage?: Stage }): Promise<string> {
   if (isMock()) return 'mock-' + Date.now().toString(36)
   const res = await fetch('/api/problem', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       problem_statement: body.text ?? '', url: body.url || null, depth: body.depth, document_ids: body.document_ids ?? [], strict: !!body.strict,
+      stage: body.stage ?? null,
     }),
   })
   if (!res.ok) throw new Error(`The court couldn't open the case (${res.status}).`)
@@ -370,16 +460,77 @@ export async function startCase(body: { text?: string; url?: string; depth: stri
 }
 
 /** POST /api/session/:id/followup -> the new (child) session id. */
-export async function followUp(id: string, body: { question: string; depth: string; strict?: boolean }): Promise<string> {
+export async function followUp(id: string, body: { question: string; depth: string; strict?: boolean; stage?: Stage }): Promise<string> {
   if (isMock() || id.startsWith('mock-')) return 'mock-' + Date.now().toString(36)
   const res = await fetch(`/api/session/${id}/followup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question: body.question, depth: body.depth, strict: !!body.strict }),
+    body: JSON.stringify({ question: body.question, depth: body.depth, strict: !!body.strict, stage: body.stage ?? null }),
   })
   if (!res.ok) throw new Error(`The court couldn't take the follow-up (${res.status}).`)
   return (await res.json()).session_id
 }
+
+/** POST /api/session/:id/refresh-data -> the new turn's id. Throws with `status` 409 when the sheet is unchanged. */
+export async function refreshData(id: string, body: { depth: string; strict?: boolean }): Promise<string> {
+  if (isMock() || id.startsWith('mock-')) return 'mock-' + Date.now().toString(36)
+  const res = await fetch(`/api/session/${id}/refresh-data`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ depth: body.depth, strict: !!body.strict }),
+  })
+  if (!res.ok) {
+    let detail: unknown = `Couldn't re-read the sheet (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw Object.assign(new Error(typeof detail === 'string' ? detail : JSON.stringify(detail)), { status: res.status })
+  }
+  return (await res.json()).session_id
+}
+/** Swap one document of a finished case for a new file -> the follow-up (re-judged) session id.
+ *  409 = the new file has the same numbers. */
+export async function updateData(id: string, documentId: string, file: File, body: { depth: string; strict?: boolean }): Promise<string> {
+  const fd = new FormData()
+  fd.append('document_id', documentId)
+  fd.append('file', file)
+  fd.append('depth', body.depth)
+  fd.append('strict', String(!!body.strict))
+  let res: Response
+  try {
+    res = await fetch(`/api/session/${id}/update-data`, { method: 'POST', body: fd })
+  } catch {
+    throw new Error('Could not reach the backend. Is it running on port 8000?')
+  }
+  if (!res.ok) {
+    let detail: unknown = res.status >= 500 ? 'The backend failed or is not running on port 8000.' : `Couldn't read the new file (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw Object.assign(new Error(typeof detail === 'string' ? detail : JSON.stringify(detail)), { status: res.status })
+  }
+  return (await res.json()).session_id
+}
+export const updateQuestion = (oldName: string, newName: string, v: number) =>
+  `I uploaded a new version of my data (${oldName} → ${newName}, version ${v}). What changed, does it change the verdict, and what should I do now?`
+
+/** A shared Google Sheet as a CSV File (via the backend), so it can join the ledger comparison like an upload. */
+export async function sheetAsFile(url: string): Promise<File> {
+  let res: Response
+  try {
+    res = await fetch('/api/connectors/google-sheet/csv', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+    })
+  } catch {
+    throw new Error('Could not reach the backend. Is it running on port 8000?')
+  }
+  if (!res.ok) {
+    let detail: unknown = `Couldn't read that sheet (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  const cd = res.headers.get('content-disposition') ?? ''
+  const name = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? 'Google Sheet.csv')
+  return new File([await res.blob()], name, { type: 'text/csv' })
+}
+
+/** The backend words a refresh turn "My numbers were updated (version N)…": show it as "Data update vN". */
+export const dataUpdateLabel = (q?: string | null) => q?.match(/^My numbers were updated \(version (\d+)\)/)?.[1]
+export const refreshQuestion = (v: number) => `My numbers were updated (version ${v}). What changed, does it change the verdict, and what should I do now?`
 
 // ---- conversation thread ----
 export interface ThreadItem { session_id: string; question?: string; verdict?: string | null; status?: string }
@@ -398,8 +549,13 @@ export function threadFromRecent(id: string): ThreadItem[] {
 export const rootOf = (id: string) => loadRecent().find((r) => r.id === id)?.root ?? id
 
 // ---- recorded event lists ----
-export interface Recorded { event: string; data: unknown }
-export const reduceAll = (events: Recorded[], base: CaseState) => events.reduce((s, e) => reduce(s, e.event, e.data), base)
+export interface Recorded { event: string; data: unknown; t?: number }
+export const reduceAll = (events: Recorded[], base: CaseState) => {
+  const s = events.reduce((st, e) => reduce(st, e.event, e.data), base)
+  const t = events[events.length - 1]?.t
+  return t != null && over(s.status) ? { ...s, duration: Math.round(t) } : s
+}
+export const over = (st?: string) => st === 'done' || st === 'error' || st === 'interrupted'
 
 const EV_KEY = 'case-events'
 const EV_MAX = 10
@@ -447,3 +603,26 @@ const HIGHLIGHT = new RegExp(
 )
 /** Splits text into [plain, match, plain, match, …]; odd indexes are numbers, money, % or dates. */
 export const splitHighlights = (t: string) => t.split(HIGHLIGHT)
+
+// ---- 90-day plan exports ----
+const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+export function planCsv(p: Plan) {
+  const rows = [['Task', 'Phase', 'Start week', 'End week', 'Owner', 'Success looks like', 'Why', 'Needs first']]
+  for (const t of p.tasks ?? [])
+    rows.push([t.title, t.phase, t.start_week, t.end_week, t.owner, t.success_metric, t.why, (t.depends_on ?? []).join(' ')].map((x) => String(x ?? '')))
+  return rows.map((r) => r.map(csvCell).join(',')).join('\r\n')
+}
+export function planMd(p: Plan) {
+  const out = [`## Your ${p.horizon_days ?? 90}-day plan`]
+  if (p.goal) out.push(`**Goal:** ${p.goal}`)
+  if (p.first_step_this_week) out.push(`**Do this first (this week):** ${p.first_step_this_week}`)
+  if (p.tasks?.length) {
+    const cell = (x?: string) => (x ?? '').replace(/\|/g, '/')
+    out.push(['| Task | Weeks | Owner | Success looks like |', '|---|---|---|---|',
+      ...p.tasks.map((t) => `| ${cell(t.title)} | W${t.start_week ?? '?'}–W${t.end_week ?? t.start_week ?? '?'} | ${cell(t.owner)} | ${cell(t.success_metric)} |`)].join('\n'))
+  }
+  const r = p.review
+  const list = (h: string, xs?: string[]) => xs?.length && out.push(`### ${h}`, xs.map((x) => `- ${x}`).join('\n'))
+  if (r) { list("What's working for you", r.strengths); list('What could hurt you', r.risks); list('Stop doing', r.stop_doing) }
+  return out.join('\n\n')
+}

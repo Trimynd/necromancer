@@ -12,8 +12,12 @@ const mdComponents: Components = {
   tr: ({ node, ...p }) => <tr {...p} className={textOf(node).includes('⚠') ? 'warn' : undefined} />,
 }
 
+// GFM swallows a line written right under a table as one more row (e.g. the "⚠️ = …" legend under
+// "Verified by code"); a blank line makes it a paragraph again.
+export const untable = (md: string) => md.replace(/^(\|.*)\n(?![ \t]*(\||$))/gm, '$1\n\n')
+
 export const Md = ({ children }: { children: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{children}</ReactMarkdown>
+  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{untable(children)}</ReactMarkdown>
 )
 
 export function Report({ md, streaming, family }: { md: string; streaming: boolean; family?: Family }) {

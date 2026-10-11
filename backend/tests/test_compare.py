@@ -76,3 +76,57 @@ def test_compare_needs_two_to_six_spreadsheets():
     assert _post(*((f"{i}.xlsx", one) for i in range(7))).status_code == 400
     r = client.post("/api/compare", files=[("files", ("a.pdf", b"%PDF", "application/pdf"))] * 2)
     assert r.status_code == 400
+
+
+def test_excel_document_gets_table_stats_and_code_verdict(tmp_path):
+    paths = {p.stem: p.read_bytes() for p in make_sample_excels.main(tmp_path)}
+    from app.services.documents import extract
+    d = extract("nykaa_fy2025.xlsx", paths["nykaa_fy2025"])
+    assert d["kind"] == "excel" and len(d["table"]["rows"]) == 4
+    assert d["stats"]["Revenue (₹ Cr)"]["last"] == 2062
+    assert d["ledger"]["overall"] is not None
+    assert d["text"].startswith("CODE HEALTH SCORE")  # the council reads the exact score + stats first
+
+
+def test_update_data_swaps_a_file_and_diffs_cells_and_verdict(tmp_path, monkeypatch):
+    from app.routes import problem as problem_routes
+    from app.services import history
+    from app.services.documents import extract
+
+    monkeypatch.setattr(history, "DIR", tmp_path)
+    paths = {p.stem: p.read_bytes() for p in make_sample_excels.main(tmp_path / "samples")}
+    v1 = extract("nykaa_fy2025.xlsx", paths["nykaa_fy2025"])
+    meta = {k: v for k, v in v1.items() if k not in ("text", "preview")}
+    history.save("case-1", {"status": "done", "problem_statement": "q", "verdict": "GO", "documents": [meta]}, [])
+    started = []
+    monkeypatch.setattr(problem_routes, "_start", lambda s: started.append(s) or problem_routes.ProblemResponse(
+        session_id=s.session_id, stream_url="", parent_id=s.parent_id))
+
+    r = client.post("/api/session/case-1/update-data", data={"document_id": v1["id"], "depth": "fast"},
+                    files={"file": ("nykaa_fy2025_whatif.xlsx", paths["nykaa_fy2025_whatif"], XLSX)})
+    assert r.status_code == 200, r.text
+    s = started[0]
+    assert s.parent_id == "case-1" and s.documents[0]["name"] == "nykaa_fy2025_whatif.xlsx" and s.documents[0]["version"] == 2
+    assert "nykaa_fy2025_whatif" in s.document_texts[0]["text"] or s.document_texts[0]["name"].startswith("nykaa")
+    d = s.data_diff[0]
+    changed = {(c["row"], c["column"]) for c in d["cells"]["changes"]}
+    assert ("Q1 FY25", "Total Expenses (₹ Cr)") in changed and ("Q1 FY25", "Revenue (₹ Cr)") not in changed
+    assert d["verdict"]["overall"]["delta"] < 0  # costs up 3% -> lower code verdict
+
+    same = client.post("/api/session/case-1/update-data", data={"document_id": v1["id"]},
+                       files={"file": ("again.xlsx", paths["nykaa_fy2025"], XLSX)})
+    assert same.status_code == 409
+    bad = client.post("/api/session/case-1/update-data", data={"document_id": "nope"},
+                      files={"file": ("x.xlsx", paths["nykaa_fy2025"], XLSX)})
+    assert bad.status_code == 400
+
+
+def test_google_sheet_csv_download(monkeypatch):
+    from app.routes import documents as doc_routes
+
+    async def fake(url):
+        return "Shop / sales", b"month,revenue\nJan,1\nFeb,2\n", "https://docs.google.com/spreadsheets/d/x#gid=0"
+    monkeypatch.setattr(doc_routes, "fetch_csv", fake)
+    r = client.post("/api/connectors/google-sheet/csv", json={"url": "https://docs.google.com/spreadsheets/d/x"})
+    assert r.status_code == 200 and r.content.startswith(b"month,revenue")
+    assert "Shop%20sales.csv" in r.headers["content-disposition"]

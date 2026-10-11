@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DOC_ICON, initials, parseVerdict, roundOf, sumSources, verdictText, type CaseState, type Ghost } from './lib'
+import { explainLabel } from './Plan'
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -21,7 +22,7 @@ function Seal({ busy, stamped }: { busy: boolean; stamped: boolean }) {
       <path d={SEAL_PATH} fill="currentColor" />
       <circle cx="50" cy="50" r="36" fill="none" stroke="rgb(255 255 255 / .35)" strokeWidth="1.5" />
       <circle cx="50" cy="50" r="31" fill="none" stroke="rgb(255 255 255 / .2)" strokeWidth="1" />
-      <text x="50" y="58" textAnchor="middle" fontFamily="Newsreader, serif" fontSize="24" fontWeight="600" fill="rgb(255 255 255 / .9)">
+      <text x="50" y="58" textAnchor="middle" fontFamily="Bricolage Grotesque, sans-serif" fontSize="24" fontWeight="600" fill="rgb(255 255 255 / .9)">
         SB
       </text>
     </svg>
@@ -39,12 +40,8 @@ const PHASE_LABEL: Record<Ghost['phase'], string> = {
   dropped: 'Left the court',
 }
 
-function GhostFigure({ g, i, n, refCb, href }: { g: Ghost; i: number; n: number; refCb: (el: HTMLDivElement | null) => void; href: string }) {
+function GhostFigure({ g, i, refCb, href }: { g: Ghost; i: number; refCb: (el: HTMLDivElement | null) => void; href: string }) {
   const [open, setOpen] = useState(false)
-  // Spread ghosts over the upper arc around the seal (desktop); CSS turns this into a grid on mobile.
-  const a = ((165 + (210 * (i + 0.5)) / n) * Math.PI) / 180
-  const x = 50 + 40 * Math.cos(a)
-  const y = 64 + 44 * Math.sin(a)
   const last = g.cases[g.cases.length - 1]
   const ruling = g.rulings[g.rulings.length - 1]?.ruling
   const round = roundOf(g)
@@ -52,7 +49,7 @@ function GhostFigure({ g, i, n, refCb, href }: { g: Ghost; i: number; n: number;
   return (
     <div
       className={`ghost ${g.phase}`}
-      style={{ ['--x' as string]: `${x}%`, ['--y' as string]: `${Math.max(20, y)}%`, ['--d' as string]: `${i * 140}ms` }}
+      style={{ ['--d' as string]: `${i * 140}ms` }}
     >
       <div className="avatar-wrap" ref={refCb}>
         {(g.phase === 'researching' || g.phase === 'spawned') && <div className="orbit" aria-hidden><i /><i /></div>}
@@ -185,7 +182,7 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
 
   const found = sumSources(s.research)
   const caption = (() => {
-    if (s.status === 'error') return 'The court was interrupted.'
+    if (s.status === 'error' || s.status === 'interrupted') return 'The court was interrupted.'
     if (v) return 'The Soul Binder has ruled.'
     if (writing) return 'The Soul Binder is writing the verdict…'
     if (deliberating) return 'The Soul Binder is weighing the cases…'
@@ -209,8 +206,13 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
         {beams.map((b, i) => <line key={i} className="beam" {...b} />)}
       </svg>
+      <div className="ghost-grid">
+        {s.ghosts.map((g, i) => (
+          <GhostFigure key={g.id} g={g} i={i} href={ghostHref(g.id)} refCb={(el) => { ghostEls.current[g.id] = el }} />
+        ))}
+      </div>
       <div className="seal-wrap" ref={seal}>
-        <Seal busy={(deliberating || writing || (!s.ghosts.length && s.status !== 'error' && s.status !== 'done'))} stamped={!!v} />
+        <Seal busy={(deliberating || writing || (!s.ghosts.length && s.status !== 'error' && s.status !== 'done' && s.status !== 'interrupted'))} stamped={!!v} />
         <div className="mt-1 text-sm font-medium" style={{ color: 'var(--seal)' }}>Soul Binder</div>
         {!!s.documents?.length && (
           <div className="bench-docs" aria-label={`${s.documents.length} documents in evidence`}>
@@ -220,14 +222,10 @@ export function Courtroom({ s, ghostHref }: { s: CaseState; ghostHref: (id: stri
         {v?.label && (
           <div className={`appear font-serif text-[22px] font-semibold leading-tight sm:text-[28px] fam-${v.family ?? 'caution'} max-w-[260px] text-center`}>
             {v.label}
-            {v.confidence != null && <span className="ml-2 font-sans text-sm text-ink-soft">{v.confidence}%</span>}
+            {explainLabel(v.label) && <span className="block font-sans text-sm font-normal text-ink">{explainLabel(v.label)}</span>}
+            {v.confidence != null && <span className="block font-sans text-xs font-normal text-ink-soft">{v.confidence}% sure</span>}
           </div>
         )}
-      </div>
-      <div className="ghost-grid">
-        {s.ghosts.map((g, i) => (
-          <GhostFigure key={g.id} g={g} i={i} n={s.ghosts.length} href={ghostHref(g.id)} refCb={(el) => { ghostEls.current[g.id] = el }} />
-        ))}
       </div>
     </section>
   )

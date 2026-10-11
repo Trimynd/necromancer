@@ -26,8 +26,11 @@ class SessionState(BaseModel):
     problem_statement: str | None = None
     depth: str = "deep"  # "fast" | "deep"
     strict: bool = False
+    stage: str | None = None  # launch | grow | rescue | revive (the user's pick; None = let the court infer)
     # Multi-turn: a follow-up points at the case it continues; prior_context briefs its council.
     parent_id: str | None = None
+    # Set when this turn re-analyses updated numbers (sheet version 2, 3...): code-computed changes.
+    data_diff: list[dict] | None = None
     prior_context: dict[str, Any] | None = Field(default=None, exclude=True)
     # Uploaded company documents: metadata is public (UI), full text stays server-side only.
     documents: list[dict] = Field(default_factory=list)
@@ -39,6 +42,7 @@ class SessionState(BaseModel):
     verdict: str | None = None
     summary: str | None = None
     scores: dict[str, Any] | None = None
+    plan: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

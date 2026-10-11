@@ -5,7 +5,7 @@ company's results (Business Standard, Inc42, Entrackr); quarters sum to the repo
 totals. A few expense/EBITDA cells are derived where a quarter wasn't reported directly (see
 NOTES). The *_whatif file is hypothetical and says so inside the workbook.
 
-    python scripts/make_sample_excels.py            # -> ../frontend-court/public/samples/
+    python scripts/make_sample_excels.py            # -> ../frontend/public/samples/
     python scripts/make_sample_excels.py some/dir
 """
 
@@ -109,6 +109,6 @@ def main(out: Path) -> list[Path]:
 
 
 if __name__ == "__main__":
-    default = Path(__file__).resolve().parents[2] / "frontend-court" / "public" / "samples"
+    default = Path(__file__).resolve().parents[2] / "frontend" / "public" / "samples"
     for p in main(Path(sys.argv[1]) if len(sys.argv) > 1 else default):
         print(p)
