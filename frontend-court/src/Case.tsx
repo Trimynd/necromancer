@@ -4,7 +4,7 @@ import { Courtroom } from './Courtroom'
 import { Md, Report } from './Report'
 import { TestimonyCard, TestimonyPanel } from './Ghost'
 import {
-  cacheEvents, DOC_ICON, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, parseVerdict, patchRecent,
+  API, cacheEvents, DOC_ICON, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, parseVerdict, patchRecent,
   reduce, reduceAll, rootOf, saveRecent, startCase, sumSources, threadFromRecent, verdictText,
   type CaseState, type Recorded, type ThreadItem,
 } from './lib'
@@ -67,7 +67,7 @@ function useCaseStream(id: string) {
     let dead = false
 
     const snapshot = async () => {
-      const res = await fetch(`/api/session/${id}`)
+      const res = await fetch(`${API}/api/session/${id}`)
       if (res.status === 404) return null
       if (!res.ok) throw new Error(String(res.status))
       return res.json()
@@ -92,7 +92,7 @@ function useCaseStream(id: string) {
       } catch { /* keep what we have */ }
     }
     const open = (retries: number) => {
-      es = new EventSource(`/api/stream/${id}`)
+      es = new EventSource(`${API}/api/stream/${id}`)
       // The server replays the whole session on connect, so start from a clean slate each time.
       es.onopen = () => { dispatch({ event: 'reset', data: null }); setConn('live') }
       for (const name of EVENTS) {

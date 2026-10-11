@@ -287,6 +287,10 @@ export function patchRecent(id: string, patch: Partial<Recent>) {
   if (found) saveRecent({ ...found, ...patch })
 }
 
+/** Backend origin. Empty in dev (Vite proxies /api); on the deployed site it's this PC's
+ * http://localhost:8000, so only a browser on the machine running the backend can use it. */
+export const API = import.meta.env.VITE_API_URL ?? ''
+
 export const isMock = () =>
   import.meta.env.VITE_USE_MOCK === 'true' || new URLSearchParams(location.search).get('mock') === '1'
 
@@ -295,7 +299,7 @@ export async function uploadDocuments(files: File[]): Promise<Doc[]> {
   if (isMock()) return files.map((f, i) => ({ id: `mock-doc-${i}`, name: f.name, kind: kindOf(f.name), chars: f.size }))
   const fd = new FormData()
   for (const f of files) fd.append('files', f)
-  const res = await fetch('/api/documents', { method: 'POST', body: fd })
+  const res = await fetch(`${API}/api/documents`, { method: 'POST', body: fd })
   if (!res.ok) {
     let detail = `Upload failed (${res.status}).`
     try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
@@ -312,7 +316,7 @@ export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', docx
 
 export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean }): Promise<string> {
   if (isMock()) return 'mock-' + Date.now().toString(36)
-  const res = await fetch('/api/problem', {
+  const res = await fetch(`${API}/api/problem`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -326,7 +330,7 @@ export async function startCase(body: { text?: string; url?: string; depth: stri
 /** POST /api/session/:id/followup -> the new (child) session id. */
 export async function followUp(id: string, body: { question: string; depth: string; strict?: boolean }): Promise<string> {
   if (isMock() || id.startsWith('mock-')) return 'mock-' + Date.now().toString(36)
-  const res = await fetch(`/api/session/${id}/followup`, {
+  const res = await fetch(`${API}/api/session/${id}/followup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question: body.question, depth: body.depth, strict: !!body.strict }),
@@ -378,7 +382,7 @@ export function cacheEvents(id: string, status: string, events: Recorded[]) {
 
 /** GET /api/session/:id/events -> null on 404 (older backend / unknown id). */
 export async function fetchEvents(id: string): Promise<{ status: string; events: Recorded[] } | null> {
-  const res = await fetch(`/api/session/${id}/events`)
+  const res = await fetch(`${API}/api/session/${id}/events`)
   if (res.status === 404) return null
   if (!res.ok) throw new Error(String(res.status))
   return res.json()
