@@ -27,12 +27,19 @@ def parse_url(url: str) -> tuple[str, str]:
 
 async def read_sheet(url: str) -> dict:
     sheet_id, gid = parse_url(url)
-    export = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+    # xlsx export = every tab + calculated values; the CSV export only gives one tab and returns
+    # HTTP 400 for some sheets even when they're shared publicly.
+    export = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
         resp = await client.get(export)
         # Private sheets redirect to a Google sign-in page (HTML) instead of CSV.
-        if resp.status_code in (401, 403, 404) or "text/csv" not in resp.headers.get("content-type", ""):
+        if resp.status_code in (401, 403) or "html" in resp.headers.get("content-type", "") and resp.status_code < 400:
             raise DocumentError(NOT_PUBLIC)
+        if resp.status_code == 404:
+            raise DocumentError("Google says this sheet doesn't exist. Check the link.")
+        if resp.status_code != 200 or not resp.content.startswith(b"PK"):
+            raise DocumentError(f"Google couldn't export this sheet (HTTP {resp.status_code}). "
+                                "Check it's a Google Sheet or Excel file shared as Anyone with the link → Viewer.")
         title = "Google Sheet"
         try:
             page = await client.get(f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
@@ -40,7 +47,7 @@ async def read_sheet(url: str) -> dict:
             title = found.group(1).strip() if found else title
         except httpx.HTTPError:
             pass
-    doc = extract(f"{title}.csv", resp.content)
+    doc = extract(f"{title}.xlsx", resp.content)
     return {**doc, "name": title, "kind": "sheet", "source": f"https://docs.google.com/spreadsheets/d/{sheet_id}"}
 
 

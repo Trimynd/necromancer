@@ -69,7 +69,7 @@ const DEMOS: { title: string; short: string; stage: Stage; text: string; url?: s
   },
 ]
 
-const ACCEPT = ['pdf', 'csv', 'txt', 'md', 'docx']
+const ACCEPT = ['pdf', 'csv', 'xlsx', 'txt', 'md', 'docx']
 const MAX_FILES = 3
 const MAX_MB = 5
 const fmtSize = (b: number) => (b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`)
@@ -105,7 +105,8 @@ export function Home() {
   // Short questions ("What is UPI?") are allowed: the router answers them directly. With documents attached,
   // a couple of words ("Is this viable?") is enough. A website alone is enough too; both go together.
   const urlBad = !!url.trim() && !urlOk
-  const ok = !urlBad && t.length <= 4000 && (t.length >= (attached ? 2 : 5) || (urlOk && !t))
+  // an attached file or sheet is enough on its own: the backend asks "Analyse the attached documents."
+  const ok = !urlBad && t.length <= 4000 && (t.length >= 5 || (attached && (!t || t.length >= 2)) || (urlOk && !t))
   const st = STAGES.find((x) => x.name === stage)!
 
   const addFiles = (list: FileList | null) => {
@@ -114,7 +115,7 @@ export function Home() {
     const next = [...files]
     for (const f of Array.from(list)) {
       const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
-      if (!ACCEPT.includes(ext)) msgs.push(`${f.name}: only PDF, CSV, TXT, MD or DOCX files.`)
+      if (!ACCEPT.includes(ext)) msgs.push(`${f.name}: only PDF, CSV, XLSX, TXT, MD or DOCX files.`)
       else if (f.size > MAX_MB * 1024 * 1024) msgs.push(`${f.name} is ${fmtSize(f.size)}; the limit is ${MAX_MB} MB.`)
       else if (next.some((x) => x.name === f.name && x.size === f.size)) continue
       else if (next.length + sheets.length >= MAX_FILES) { msgs.push(`Up to ${MAX_FILES} files, please.`); break }
@@ -169,21 +170,9 @@ export function Home() {
 
   return (
     <div className="pt-2 sm:pt-6">
-      <section className="hero relative mb-8 overflow-hidden rounded-md" aria-labelledby="hero-title">
-        <img src="/hero.webp" alt="" width={960} height={536} fetchPriority="high" className="absolute inset-0 h-full w-full object-cover" />
-        <div className="relative max-w-[60ch] px-5 py-8 sm:px-8 sm:py-14">
-          <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[.14em] text-[#87c9b8]">
-            <span className="pulse-dot" aria-hidden /> The business afterlife engine
-          </p>
-          <h1 id="hero-title" className="mt-3 font-serif text-[40px] font-extrabold leading-[.9] tracking-[-.06em] sm:text-[72px]">
-            Every company<br />leaves a <span className="accent">ghost.</span>
-          </h1>
-          <p className="mt-4 max-w-[48ch] text-[15px] leading-7 text-[#a9c0c2] sm:text-base">
-            Describe a business: an idea, one that's growing or struggling, or one that already died. A council of ghosts
-            researches it live, the Soul Binder cross-examines them, and you get a verdict with sources.
-          </p>
-        </div>
-      </section>
+      <h1 className="mb-5 font-serif text-[26px] font-bold tracking-[-.02em] sm:text-[32px]">
+        Describe your business. <span className="text-[var(--seal)]">Get a verdict.</span>
+      </h1>
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <form onSubmit={submit} className="sheet min-w-0 space-y-4 p-4 sm:p-7">
@@ -234,6 +223,7 @@ export function Home() {
             {urlOk && <p className="mt-1 text-xs text-ink-soft">The court reads this link alongside your question.</p>}
           </div>
 
+          <div className="grid gap-3 md:grid-cols-2">
           <div
             className={`rounded-md border border-dashed p-4 text-sm transition-colors ${dragging ? 'border-seal bg-sheet' : 'border-hair'}`}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
@@ -253,7 +243,7 @@ export function Home() {
                 />
               </label>
             </div>
-            <p className="mt-1 text-xs text-ink-soft">PDF, CSV, TXT, MD or DOCX · up to {MAX_FILES} files, {MAX_MB} MB each.</p>
+            <p className="mt-1 text-xs text-ink-soft">PDF, CSV, XLSX, TXT, MD or DOCX · up to {MAX_FILES} files, {MAX_MB} MB each.</p>
             {files.length > 0 && (
               <ul className="mt-2 flex flex-wrap gap-2" aria-label="Attached files">
                 {files.map((f, i) => (
@@ -280,7 +270,8 @@ export function Home() {
           </div>
           <div className="rounded-md border border-hair p-4 text-sm">
             <label htmlFor="sheet" className="font-medium"><span aria-hidden>{DOC_ICON.sheet}</span> Connect a Google Sheet</label>
-            <p className="text-xs text-ink-soft">We read your numbers (sales, customers, costs…) and the council analyses your real performance.</p>
+            <p className="text-xs text-ink-soft">Paste the link: we read your numbers (sales, customers, costs…) and the council analyses your real performance. Update the sheet later and re-analyse in one click.</p>
+            <p className="mt-1 text-xs"><span className="text-ink-soft">First, in Google Sheets:</span> <b>Share → Anyone with the link → Viewer</b></p>
             <div className="mt-2 flex flex-wrap gap-2">
               <input
                 id="sheet" type="url" className="field min-w-0 flex-1 !py-1.5" placeholder="https://docs.google.com/spreadsheets/d/…"
@@ -310,10 +301,7 @@ export function Home() {
               </ul>
             )}
             {sheetErr && <p role="alert" className="fam-stop mt-2">{sheetErr}</p>}
-            <details className="mt-2 text-xs text-ink-soft" open={!!sheetErr}>
-              <summary className="cursor-pointer">How to share your sheet</summary>
-              <p className="mt-1">In Google Sheets: <b>Share</b> → General access → <b>Anyone with the link</b> → <b>Viewer</b>. Then copy the link and paste it here. We only read it.</p>
-            </details>
+          </div>
           </div>
           <label className="flex items-start gap-2 text-sm text-ink-soft">
             <input type="checkbox" className="mt-1 accent-[var(--seal)]" checked={strict} onChange={(e) => setStrict(e.target.checked)} />

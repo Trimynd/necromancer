@@ -4,9 +4,9 @@ import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, Radar, RadarChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { familyOf, roundOf, statsOf, sumSources, type CaseState, type Doc, type Family } from './lib'
+import { familyOf, roundOf, statsOf, sumSources, type CaseState, type Doc } from './lib'
 import { srcLabel } from './Ghost'
-import { Term } from './Plan'
+import { Gauge, Term } from './Plan'
 
 // Fixed categorical order (validated palette, slots 1-5 + 7); colour follows the source type, never its rank.
 const SRC_COLORS: Record<string, string> = {
@@ -26,22 +26,6 @@ function Card({ title, children, wide }: { title: ReactNode; children: ReactNode
       <figcaption className="mb-2 font-serif text-lg">{title}</figcaption>
       {children}
     </figure>
-  )
-}
-
-export function Gauge({ value, label, family, pending = true }: { value?: number; label?: string; family?: Family; pending?: boolean }) {
-  const v = Math.max(0, Math.min(100, value ?? 0))
-  const fam = family ?? (v >= 67 ? 'go' : v >= 40 ? 'caution' : 'stop')
-  return (
-    <svg viewBox="0 0 200 118" className="mx-auto block w-full max-w-[260px]" role="img" aria-label={value == null ? 'Health score not available' : `Health score ${v} out of 100${label ? `, ${label}` : ''}`}>
-      <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--hair)" strokeWidth="14" strokeLinecap="round" />
-      {value != null && (
-        <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke={`var(--${fam})`} strokeWidth="14" strokeLinecap="round"
-          pathLength={100} strokeDasharray={`${v} 100`} className="gauge-arc" />
-      )}
-      <text x="100" y="84" textAnchor="middle" fontSize="34" fontWeight="600" fontFamily="Bricolage Grotesque, sans-serif" fill="var(--ink)">{value == null ? '–' : v}</text>
-      <text x="100" y="106" textAnchor="middle" fontSize="13" fontWeight="600" fill={`var(--${fam})`}>{label ?? (value != null ? '/ 100' : pending ? 'working it out…' : '')}</text>
-    </svg>
   )
 }
 
@@ -257,7 +241,10 @@ export function Numbers({ doc }: { doc: Doc }) {
                   {st.change_pct == null ? '–' : `${st.change_pct > 0 ? '▲' : st.change_pct < 0 ? '▼' : '■'} ${Math.abs(st.change_pct)}%`}
                   <span className="text-ink-soft"> since first row</span>
                 </dd>
-                <dd className="text-xs text-ink-soft">range {fmt(st.min)} – {fmt(st.max)}</dd>
+                <dd className="text-xs text-ink-soft">{fmt(st.first)} → {fmt(st.last)} · range {fmt(st.min)} – {fmt(st.max)}</dd>
+                {st.recent_change_pct != null && t.rows.length > 3 && (
+                  <dd className="text-xs text-ink-soft">Last 3 rows: {st.recent_change_pct > 0 ? '▲' : st.recent_change_pct < 0 ? '▼' : '■'} {Math.abs(st.recent_change_pct)}%</dd>
+                )}
               </div>
             )
           })}

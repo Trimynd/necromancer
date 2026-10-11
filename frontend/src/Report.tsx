@@ -10,6 +10,10 @@ const mdComponents: Components = {
   a: ({ node: _n, ...p }) => <a {...p} target="_blank" rel="noreferrer" />,
   table: ({ node: _n, ...p }) => <div className="table-wrap"><table {...p} /></div>,
   tr: ({ node, ...p }) => <tr {...p} className={textOf(node).includes('⚠') ? 'warn' : undefined} />,
+  td: ({ node, ...p }) => {
+    const t = textOf(node).trim()
+    return <td {...p} className={t.startsWith('✓') ? 'cell-ok' : t.includes('⚠') ? 'cell-warn' : undefined} />
+  },
 }
 
 // GFM swallows a line written right under a table as one more row (e.g. the "⚠️ = …" legend under

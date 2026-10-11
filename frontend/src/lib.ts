@@ -387,9 +387,9 @@ export async function connectSheet(url: string): Promise<Doc[]> {
 
 export const kindOf = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'docx' ? 'docx' : 'text'
+  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'xlsx' ? 'xlsx' : ext === 'docx' ? 'docx' : 'text'
 }
-export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', docx: '📘', text: '📄' }
+export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', xlsx: '📗', docx: '📘', text: '📄' }
 export const docLabel = (d: Doc) =>
   d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
     : d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''

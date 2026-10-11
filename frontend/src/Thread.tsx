@@ -1,7 +1,7 @@
 // Conversation pieces of a case page: the thread of earlier cases, the live step list, and the follow-up composer.
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { followUp, isMock, loadRecent, parseVerdict, rootOf, saveRecent, sumSources, type CaseState, type ThreadItem } from './lib'
+import { dataUpdateLabel, followUp, isMock, loadRecent, parseVerdict, rootOf, saveRecent, sumSources, type CaseState, type ThreadItem } from './lib'
 
 /** "You asked … → Soul Binder ruled PIVOT" for each earlier case in this thread (oldest first). */
 export function Thread({ items, search }: { items: ThreadItem[]; search: string }) {
@@ -15,8 +15,14 @@ export function Thread({ items, search }: { items: ThreadItem[]; search: string 
           return (
             <li key={t.session_id}>
               <Link to={`/case/${t.session_id}${search}`} className="chip inline-flex max-w-full flex-wrap items-center gap-x-1.5 !px-2.5 !py-1 hover:border-seal">
-                <span className="text-ink-soft">You asked</span>
-                <span className="max-w-[40ch] truncate font-medium">“{t.question || 'Earlier question'}”</span>
+                {dataUpdateLabel(t.question) ? (
+                  <span className="font-medium"><span aria-hidden>📗 </span>Data update v{dataUpdateLabel(t.question)}</span>
+                ) : (
+                  <>
+                    <span className="text-ink-soft">You asked</span>
+                    <span className="max-w-[40ch] truncate font-medium">“{t.question || 'Earlier question'}”</span>
+                  </>
+                )}
                 <span aria-hidden className="text-ink-soft">→</span>
                 {label ? (
                   <span className={`fam-${v?.family ?? 'caution'}`}>Soul Binder ruled {label}</span>

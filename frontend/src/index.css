@@ -244,3 +244,19 @@ mark.hl { background: color-mix(in srgb, var(--ghost) 26%, transparent); color: 
 .g-row.on { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .g-row.on .g-name { background: color-mix(in srgb, var(--ink) 5%, var(--sheet)); }
 @media print { .gantt-wrap { overflow: visible; } .gantt { min-width: 0; } .term-tip { display: none; } }
+
+/* ---------- case stepper ---------- */
+.step-tab { display: flex; align-items: center; gap: .4rem; padding: .4rem .75rem; border: 1px solid var(--hair); border-radius: 2px; white-space: nowrap;
+  background: color-mix(in srgb, var(--raised) 60%, transparent); transition: border-color .2s, background .2s; }
+.step-tab:hover:not(:disabled) { border-color: color-mix(in srgb, var(--seal) 60%, transparent); }
+.step-tab.on { border-color: var(--seal); background: color-mix(in srgb, var(--seal) 12%, transparent); font-weight: 600; }
+.step-tab:disabled { opacity: .45; cursor: not-allowed; }
+.step-pane { animation: step-in .35s ease-out both; }
+.step-pane.back { animation-name: step-in-back; }
+@keyframes step-in { from { opacity: 0; translate: 28px 0; } }
+@keyframes step-in-back { from { opacity: 0; translate: -28px 0; } }
+
+/* "Verified by code": ✓ green, ⚠️ amber, the legend under the table as small text. */
+.md td.cell-ok { color: var(--go); }
+.md td.cell-warn { color: var(--caution); }
+.sec-verified .table-wrap + p { font-size: 12px; color: var(--ink-soft); }

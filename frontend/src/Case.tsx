@@ -1,16 +1,17 @@
-import { lazy, Suspense, useEffect, useReducer, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Courtroom } from './Courtroom'
 import { Md, Report } from './Report'
 import { TestimonyCard, TestimonyPanel } from './Ghost'
 import {
-  cacheEvents, dataUpdateLabel, DOC_ICON, docLabel, mockInterrupted, planMd, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, over, parseVerdict, patchRecent, refreshData, refreshQuestion,
+  cacheEvents, dataUpdateLabel, DOC_ICON, docLabel, mockInterrupted, planMd, fetchEvents, followUp, fromSnapshot, initialState, isMock, loadCachedEvents, loadRecent, over, parseVerdict, patchRecent,
   reduce, reduceAll, rootOf, saveRecent, startCase, sumSources, threadFromRecent, verdictText,
   type CaseState, type Recorded, type ThreadItem,
 } from './lib'
 import { MOCK_SHEET, MOCK_TEXT, playMock } from './mock'
 import { FollowUpBox, LiveSteps, Thread } from './Thread'
-import { PlainVerdict, PlanSection, Review } from './Plan'
+import { explainLabel, Gauge, PlainVerdict, PlanSection, Review } from './Plan'
+import { DataChanged, SheetRefresh } from './Sheet'
 
 // recharts is the heavy part of the bundle; only fetch it once a case has something to chart.
 const loadDashboard = () => import('./Dashboard')
@@ -190,40 +191,48 @@ function useCaseStream(id: string) {
   return { s, conn, meta }
 }
 
-const STEPS = ['Read', 'Research', 'Council', 'Testimony', 'Rulings', 'Verdict', 'Report'] as const
-const ANCHOR: Record<(typeof STEPS)[number], string> = {
-  Read: 'words', Research: 'research', Council: 'council', Testimony: 'testimony', Rulings: 'testimony', Verdict: 'verdict', Report: 'report',
+// ---- the stepper: one step on screen at a time ----
+type StepKey = 'read' | 'research' | 'council' | 'rulings' | 'verdict' | 'plan' | 'details' | 'followup'
+const STEP_NAME: Record<StepKey, string> = {
+  read: 'Read', research: 'Research', council: 'Council', rulings: 'Rulings', verdict: 'Verdict', plan: 'Plan', details: 'Details', followup: 'Follow-up',
 }
-function stepIndex(s: CaseState) {
+const FULL: StepKey[] = ['read', 'research', 'council', 'rulings', 'verdict', 'plan', 'details', 'followup']
+const SIMPLE: StepKey[] = ['read', 'research', 'verdict', 'followup']
+
+/** The step the run has reached (live), or the furthest step with something to show (stopped early). */
+function reachedStep(s: CaseState): StepKey {
   switch (s.status) {
-    case 'pending': case 'routing': return 0
-    case 'scraping': case 'researching': return 1
-    case 'role_making': return 2
-    case 'in_court': return s.attempt >= 0 ? 4 : 3
-    case 'summarizing': return s.report ? 6 : 5
-    case 'done': return 7
-    default: return s.report ? 6 : s.attempt >= 0 ? 4 : s.ghosts.length ? 3 : s.research ? 2 : 0
+    case 'pending': case 'routing': case 'scraping': return 'read'
+    case 'researching': return 'research'
+    case 'role_making': return 'council'
+    case 'in_court': return s.ghosts.some((g) => g.cases.length) ? 'rulings' : 'council'
+    case 'summarizing': case 'done': return 'verdict'
+    default:
+      return s.report || s.verdict || s.scores ? 'verdict' : s.ghosts.some((g) => g.cases.length) ? 'rulings'
+        : s.ghosts.length ? 'council' : s.research ? 'research' : 'read'
   }
 }
 
-function Rail({ s, simple }: { s: CaseState; simple: boolean }) {
-  const idx = stepIndex(s)
-  const steps = simple ? (['Read', 'Research', 'Verdict'] as const) : STEPS
-  const at = simple ? (idx >= 7 ? 3 : Math.min(idx, 2)) : idx
+function StepBar({ steps, at, live, enabled, go }: { steps: StepKey[]; at: StepKey; live?: StepKey; enabled: (k: StepKey) => boolean; go: (k: StepKey) => void }) {
+  const li = live ? steps.indexOf(live) : steps.length
   return (
-    <nav aria-label="Proceedings" className="no-print min-w-0 self-start lg:sticky lg:top-4">
-      <h2 className="mb-2 hidden font-serif text-lg lg:block">Proceedings</h2>
-      <ol className="flex gap-3 overflow-x-auto pb-1 text-sm [scrollbar-width:none] lg:flex-col lg:gap-1.5">
-        {steps.map((name, i) => {
-          const state = s.status === 'error' && i === at ? 'err' : i < at ? 'done' : i === at ? 'now' : 'todo'
+    <nav aria-label="Steps" className="no-print">
+      <ol className="flex gap-1 overflow-x-auto pb-1 text-sm [scrollbar-width:none]">
+        {steps.map((k, i) => {
+          const on = k === at
+          const done = i < li
           return (
-            <li key={name} className="shrink-0">
-              <a href={`#${ANCHOR[name]}`} className={`flex items-center gap-1.5 ${state === 'todo' ? 'text-ink-soft' : ''}`} aria-current={state === 'now' ? 'step' : undefined}>
-                <span aria-hidden className={state === 'done' ? 'fam-go' : state === 'now' ? 'text-seal' : state === 'err' ? 'fam-stop' : ''}>
-                  {state === 'done' ? '✓' : state === 'now' ? '●' : state === 'err' ? '✕' : '○'}
-                </span>
-                {name}
-              </a>
+            <li key={k} className="shrink-0">
+              <button
+                type="button"
+                disabled={!enabled(k)}
+                onClick={() => go(k)}
+                aria-current={on ? 'step' : undefined}
+                className={`step-tab ${on ? 'on' : ''}`}
+              >
+                <span aria-hidden className={k === live ? 'text-seal' : done ? 'fam-go' : ''}>{k === live ? '●' : done ? '✓' : '○'}</span>
+                {i + 1}. {STEP_NAME[k]}
+              </button>
             </li>
           )
         })}
@@ -265,15 +274,6 @@ function CaseView() {
   // Recorded run length when we have it; else from when this browser started the case (survives a reload).
   const seconds = !finished ? undefined : s.duration ?? (ranLive.current && t1 ? Math.round((t1 - since) / 1000) : undefined)
 
-  // Glide to the verdict once, when it arrives live (never on reduced motion or a revisited case).
-  const scrolled = useRef(false)
-  useEffect(() => {
-    if (!s.verdict || scrolled.current || !ranLive.current || simple) return
-    scrolled.current = true
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    setTimeout(() => document.getElementById('verdict')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
-  }, [s.verdict, simple])
-
   const download = () => {
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([s.plan ? `${s.report}
@@ -304,6 +304,54 @@ ${planMd(s.plan)}
     } catch { setRetrying(false) }
   }
 
+  // Steps: follow the run live (pick = null) or stay on the step the user chose.
+  const steps = simple ? SIMPLE : FULL
+  const reached = reachedStep(s)
+  const live = finished ? undefined : reached
+  const [pick, setPick] = useState<StepKey | null>(null)
+  const at: StepKey = pick && steps.includes(pick) ? pick : steps.includes(reached) ? reached : 'verdict'
+  const atIdx = steps.indexOf(at)
+  const enabled = (k: StepKey) =>
+    s.status === 'done' ? true
+      : steps.indexOf(k) <= steps.indexOf(reached) || (k === 'details' && (s.status === 'summarizing' || !!s.report))
+  const go = (k: StepKey) => setPick(!finished && k === reached ? null : k)
+  const move = (d: 1 | -1) => {
+    for (let i = atIdx + d; i >= 0 && i < steps.length; i += d) if (enabled(steps[i])) return go(steps[i])
+  }
+  // A run that finishes while you watch lands on the verdict page.
+  useEffect(() => { if (finished && ranLive.current) setPick(null) }, [finished])
+  // Slide direction, and keep the top of the new step in view.
+  const lastIdx = useRef(atIdx)
+  const dir = atIdx < lastIdx.current ? 'back' : 'fwd'
+  const top = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (lastIdx.current === atIdx) return
+    lastIdx.current = atIdx
+    const el = top.current
+    if (el && el.getBoundingClientRect().top < 0)
+      el.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [atIdx])
+  // ←/→ between steps (not while typing or reading a testimony).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (ghostId || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      const t = e.target as HTMLElement
+      if (t.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      if (e.key === 'ArrowRight') move(1)
+      else if (e.key === 'ArrowLeft') move(-1)
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  })
+  const touch = useRef<{ x: number; y: number }>(undefined)
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const t0 = touch.current, t = e.changedTouches[0]
+    touch.current = undefined
+    if (!t0 || !t) return
+    const dx = t.clientX - t0.x, dy = t.clientY - t0.y
+    if (Math.abs(dx) > 70 && Math.abs(dy) < 50) move(dx < 0 ? 1 : -1)
+  }
+
   if (conn === 'missing')
     return (
       <div className="mx-auto max-w-[68ch] py-16 text-center">
@@ -314,7 +362,195 @@ ${planMd(s.plan)}
 
   const tokens = Object.values(s.usage ?? {}).reduce((n, u) => n + (u.input ?? 0) + (u.output ?? 0) + (u.thinking ?? 0), 0)
   const calls = Object.values(s.usage ?? {}).reduce((n, u) => n + (u.calls ?? 0), 0) || s.calls
-  const showStage = !simple && !(finished && !s.ghosts.length)
+  const sheetDocs = (s.documents ?? []).filter((d) => d.kind === 'sheet')
+  const update = dataUpdateLabel(s.text)
+  const prev = steps.slice(0, atIdx).reverse().find(enabled)
+  const courtroom = !simple && s.ghosts.length > 0 && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />
+  const numbers = sheets.length > 0 && (
+    <Suspense fallback={<div className="entry space-y-2" aria-label="Loading your numbers"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
+      {sheets.map((d) => <Numbers key={d.id} doc={d} />)}
+    </Suspense>
+  )
+  const actions = s.status === 'done' && (
+    <div className="no-print mt-6 flex flex-wrap gap-2 text-sm">
+      <button className="btn btn-seal" onClick={download}>Download report (.md)</button>
+      <button className="btn btn-line" onClick={() => print()}>Print / PDF</button>
+      <button className="btn btn-line" onClick={() => go('followup')}>Ask a follow-up</button>
+      {sheetDocs.length > 0 && <a className="btn btn-line" href="#sheet-refresh">Re-analyse my sheet</a>}
+      <button className="btn btn-line" onClick={() => navigator.clipboard?.writeText(location.href)}>Copy link</button>
+    </div>
+  )
+
+  const pane: Record<StepKey, ReactNode> = {
+    read: (
+      <>
+        <section id="words" className="py-6">
+          {update && <p className="eyebrow mb-1">Data update v{update}</p>}
+          {s.text ? (
+            <p className="max-w-[68ch] font-serif text-[20px] italic leading-snug">“{s.text}”</p>
+          ) : (
+            <p className="text-ink-soft">{conn === 'connecting' ? 'Opening the case…' : 'Case'}</p>
+          )}
+          {s.url && <p className="mt-1 text-sm text-ink-soft">Website: <a className="underline" href={s.url} target="_blank" rel="noreferrer">{s.url}</a></p>}
+          {meta.parent_id && (
+            <p className="mt-1 text-sm text-ink-soft">
+              ↳ Continues from <Link className="underline" to={`/case/${meta.parent_id}${search}`}>case {meta.parent_id.slice(0, 8)}</Link>; the council was
+              briefed on its verdict.
+            </p>
+          )}
+          {!finished && <LiveSteps s={s} since={since} />}
+        </section>
+        {s.dataChanged && <DataChanged sheets={s.dataChanged} />}
+        {!!s.documents?.length && (
+          <section id="documents" className="entry">
+            <h2 className="font-serif text-xl">Documents in evidence</h2>
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {s.documents.map((d) => (
+                <li key={d.id} className="chip chip-doc flex max-w-full items-center gap-1.5 !px-2.5 !py-1 text-sm" title={d.preview}>
+                  <span aria-hidden>{DOC_ICON[d.kind] ?? '📄'}</span>
+                  <span className="truncate">{d.name}</span>
+                  <span className="shrink-0 opacity-75">{docLabel(d)}{d.version && d.version > 1 ? ` · v${d.version}` : ''}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-ink-soft">Read as data to brief the council, never as instructions.</p>
+          </section>
+        )}
+        {s.route && (
+          <section className="entry text-[15px]">
+            <span className="text-ink-soft">Read as: </span>
+            <span className="font-medium">{s.route.topic.replace(/_/g, ' ')}</span>
+            <span className="text-ink-soft"> · {simple ? 'a quick question' : 'needs the full court'}</span>
+          </section>
+        )}
+        {s.startup && (
+          <section className="entry text-[15px]">
+            <h2 className="font-serif text-xl">The old website</h2>
+            <StartupInfo d={s.startup} />
+          </section>
+        )}
+      </>
+    ),
+    research: (
+      <>
+        {s.research ? (
+          <section id="research" className="entry">
+            <h2 className="font-serif text-[28px]">Research</h2>
+            <p className="text-sm text-ink-soft">{s.research.length} searches, {sumSources(s.research)} sources</p>
+            <ul className="mt-2 space-y-1 text-sm">
+              {s.research.map((r, i) => (
+                <li key={i}>
+                  <span className="font-medium">{r.query}</span>
+                  <span className="text-ink-soft">
+                    {' '}· {r.chunks_stored} stored
+                    {r.per_source && ' · ' + Object.entries(r.per_source).map(([k, n]) => `${k === 'document' ? 'your documents' : k} ${n}`).join(', ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : (
+          <section className="entry text-ink-soft">{finished ? 'No web research was needed for this one.' : <LiveSteps s={s} since={since} />}</section>
+        )}
+        {numbers}
+      </>
+    ),
+    council: (
+      <>
+        {courtroom || <section className="entry text-ink-soft">{finished ? 'No council was summoned.' : <LiveSteps s={s} since={since} />}</section>}
+        {s.ghosts.length > 0 && (
+          <section id="council" className="entry">
+            <h2 className="font-serif text-[28px]">The council assembled</h2>
+            {s.problemSummary && <p className="mt-1 max-w-[68ch] font-serif text-[18px]">{s.problemSummary}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {s.ghosts.map((g, i) => (
+                <Link key={g.id} to={`${base}/ghost/${g.id}${search}`} className="appear chip !px-2.5 !py-1 text-sm" style={{ animationDelay: `${i * 120}ms`, borderColor: 'var(--ghost)' }}>
+                  {g.name}
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+      </>
+    ),
+    rulings: (
+      <>
+        {!finished && courtroom}
+        <section id="testimony" className="entry">
+          <h2 className="font-serif text-[28px]">Testimony and rulings</h2>
+          <div className="mt-2 divide-y divide-hair">
+            {s.ghosts.map((g) => <TestimonyCard key={g.id} g={g} href={`${base}/ghost/${g.id}${search}`} />)}
+          </div>
+        </section>
+      </>
+    ),
+    verdict: simple ? (
+      <section id="verdict" className="entry">
+        <h2 className="font-serif text-[28px]">The answer</h2>
+        <p className="mb-2 text-sm text-ink-soft">This was a quick question, so no court was needed.</p>
+        {s.verdict || s.report ? <div className="md bar-seal"><Md>{s.report || s.verdict || ''}</Md></div> : <LiveSteps s={s} since={since} />}
+      </section>
+    ) : (
+      <>
+        {v || s.scores || !finished ? (
+          <div className="grid gap-x-6 md:grid-cols-[minmax(0,1fr)_240px]">
+            <PlainVerdict s={s} v={v} assumption={assumption} />
+            <figure className="entry self-start rounded-md border border-hair p-4 text-center">
+              <Gauge value={s.scores?.overall} label={s.scores?.label ?? v?.label} family={v?.family} pending={!finished} />
+              <figcaption className="mt-1 text-sm text-ink-soft">
+                Health score out of 100{explainLabel(s.scores?.label ?? v?.label) ? `: ${explainLabel(s.scores?.label ?? v?.label)}` : ''}.
+              </figcaption>
+            </figure>
+          </div>
+        ) : (
+          <section className="entry text-ink-soft">The court stopped before a verdict. See the earlier steps for what it found.</section>
+        )}
+        {s.dataChanged && <DataChanged sheets={s.dataChanged} />}
+        <PlanSection plan={s.plan} pending={s.status === 'summarizing'} title={s.text} />
+        <Review plan={s.plan} top={3} />
+        {actions}
+        {s.status === 'done' && sheetDocs.length > 0 && <SheetRefresh id={id} sheets={sheetDocs} />}
+      </>
+    ),
+    plan: (
+      <>
+        <PlanSection plan={s.plan} pending={s.status === 'summarizing'} title={s.text} />
+        <Review plan={s.plan} />
+        {!s.plan && s.status !== 'summarizing' && <section className="entry text-ink-soft">No plan was made for this case.</section>}
+      </>
+    ),
+    details: (
+      <>
+        {!simple && s.ghosts.length > 0 && (s.status === 'summarizing' || s.verdict || s.scores || s.plan || finished) && (
+          <Suspense fallback={<div className="entry space-y-2" aria-label="Loading charts"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
+            <Dashboard s={s} seconds={seconds} />
+          </Suspense>
+        )}
+        {(s.report || s.status === 'summarizing') && (
+          <section id="report" className="entry">
+            <h2 className="sr-only">Full report</h2>
+            {s.report ? (
+              <Report md={s.report} streaming={s.status === 'summarizing'} family={v?.family} />
+            ) : (
+              <div className="space-y-2" aria-label="The Soul Binder is writing">
+                <p className="text-ink-soft">The Soul Binder is writing…</p>
+                <div className="skel w-full" /><div className="skel w-11/12" /><div className="skel w-3/4" />
+              </div>
+            )}
+            {actions}
+          </section>
+        )}
+      </>
+    ),
+    followup: (
+      <>
+        {finished && (s.text || s.report) ? <FollowUpBox id={id} family={v?.family} suggested={s.plan?.suggested_followups} />
+          : <section className="entry text-ink-soft">You can ask a follow-up once the verdict is in.</section>}
+        {s.status === 'done' && sheetDocs.length > 0 && <SheetRefresh id={id} sheets={sheetDocs} />}
+        <p className="entry text-sm"><Link className="text-seal underline" to={isMock() ? '/?mock=1' : '/'}>Start a new case</Link></p>
+      </>
+    ),
+  }
 
   return (
     <div>
@@ -328,178 +564,61 @@ ${planMd(s.plan)}
       )}
       {interrupted && (
         <section role="alert" className="no-print mb-4 rounded-md border border-seal/50 bg-sheet px-4 py-3">
-          <p className="font-serif text-lg">This run was interrupted (the server restarted). Everything up to that point is below.</p>
+          <p className="font-serif text-lg">This run was interrupted (the server restarted). Everything up to that point is in the steps below.</p>
           {(s.text || s.url) && (
             <button className="btn btn-seal mt-2 text-sm" onClick={tryAgain} disabled={retrying}>{retrying ? 'Opening…' : 'Run it again'}</button>
           )}
         </section>
       )}
+      {(s.error || s.status === 'error') && (
+        <section className="no-print mb-4" role="alert">
+          <div className="bar-seal">
+            <h2 className="font-serif text-xl fam-stop">The court couldn't finish this case</h2>
+            <p className="mt-1 text-sm text-ink-soft">{s.error || 'Something went wrong on the server.'}</p>
+            <div className="mt-3 flex gap-2 text-sm">
+              {(s.text || s.url) && (
+                <button className="btn btn-seal" onClick={tryAgain} disabled={retrying}>{retrying ? 'Opening…' : 'Try again'}</button>
+              )}
+              <Link className="btn btn-line" to="/">Start a new case</Link>
+            </div>
+          </div>
+        </section>
+      )}
       <Thread items={meta.thread} search={search} />
-      {showStage && <Courtroom s={s} ghostHref={(gid) => `${base}/ghost/${gid}${search}`} />}
       {ghostId && <TestimonyPanel s={s} ghostId={ghostId} base={base} search={search} />}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[180px_minmax(0,1fr)]">
-        <Rail s={s} simple={simple} />
-        <div className="sheet min-w-0 px-4 sm:px-8">
-          <section id="words" className="py-6">
-            {s.text ? (
-              <p className="max-w-[68ch] font-serif text-[20px] italic leading-snug">“{s.text}”</p>
-            ) : (
-              <p className="text-ink-soft">{conn === 'connecting' ? 'Opening the case…' : 'Case'}</p>
-            )}
-            {s.url && <p className="mt-1 text-sm text-ink-soft">Website: <a className="underline" href={s.url} target="_blank" rel="noreferrer">{s.url}</a></p>}
-            {meta.parent_id && (
-              <p className="mt-1 text-sm text-ink-soft">
-                ↳ Continues from <Link className="underline" to={`/case/${meta.parent_id}${search}`}>case {meta.parent_id.slice(0, 8)}</Link>; the council was
-                briefed on its verdict.
-              </p>
-            )}
-            {!finished && <LiveSteps s={s} since={since} />}
-          </section>
+      <div ref={top} className="no-print mb-3 flex scroll-mt-4 flex-wrap items-center gap-2">
+        {prev ? (
+          <button type="button" className="btn btn-line !px-3 !py-1 text-sm" onClick={() => go(prev)}>← Back to {STEP_NAME[prev]}</button>
+        ) : (
+          <Link className="btn btn-line !px-3 !py-1 text-sm" to={isMock() ? '/?mock=1' : '/'}>← Back to home</Link>
+        )}
+        {pick && !finished && pick !== reached && (
+          <button type="button" className="btn btn-seal !px-3 !py-1 text-sm" onClick={() => setPick(null)}>
+            <span className="pulse-dot mr-1.5" aria-hidden /> Follow live
+          </button>
+        )}
+        <span className="ml-auto hidden text-xs text-ink-soft sm:inline">Use ← → to move between steps</span>
+      </div>
+      <StepBar steps={steps} at={at} live={live} enabled={enabled} go={go} />
 
-          {!!s.documents?.length && (
-            <section id="documents" className="entry">
-              <h2 className="font-serif text-xl">Documents in evidence</h2>
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {s.documents.map((d) => (
-                  <li key={d.id} className="chip chip-doc flex max-w-full items-center gap-1.5 !px-2.5 !py-1 text-sm" title={d.preview}>
-                    <span aria-hidden>{DOC_ICON[d.kind] ?? '📄'}</span>
-                    <span className="truncate">{d.name}</span>
-                    <span className="shrink-0 opacity-75">{docLabel(d)}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1 text-xs text-ink-soft">Read as data to brief the council, never as instructions.</p>
-            </section>
+      <div className="sheet mt-2 min-w-0 overflow-hidden px-4 sm:px-8"
+        onTouchStart={(e) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }} onTouchEnd={onTouchEnd}>
+        <div key={at} className={`step-pane ${dir}`}>
+          <h2 className="sr-only">Step {atIdx + 1} of {steps.length}: {STEP_NAME[at]}</h2>
+          {pane[at]}
+          {atIdx < steps.length - 1 && enabled(steps[atIdx + 1]) && (
+            <div className="no-print entry flex justify-end">
+              <button type="button" className="btn btn-line" onClick={() => move(1)}>Next: {STEP_NAME[steps[atIdx + 1]]} →</button>
+            </div>
           )}
-
-          {s.route && (
-            <section className="entry text-[15px]">
-              <span className="text-ink-soft">Read as: </span>
-              <span className="font-medium">{s.route.topic.replace(/_/g, ' ')}</span>
-              <span className="text-ink-soft"> · {simple ? 'a quick question' : 'needs the full court'}</span>
-            </section>
-          )}
-
-          {s.startup && (
-            <section className="entry text-[15px]">
-              <h2 className="font-serif text-xl">The old website</h2>
-              <StartupInfo d={s.startup} />
-            </section>
-          )}
-
-          {s.research && (
-            <section id="research" className="entry">
-              <details open={!finished}>
-                <summary className="cursor-pointer font-serif text-xl">
-                  Research: {s.research.length} searches, {sumSources(s.research)} sources
-                </summary>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {s.research.map((r, i) => (
-                    <li key={i}>
-                      <span className="font-medium">{r.query}</span>
-                      <span className="text-ink-soft">
-                        {' '}· {r.chunks_stored} stored
-                        {r.per_source && ' · ' + Object.entries(r.per_source).map(([k, n]) => `${k === 'document' ? 'your documents' : k} ${n}`).join(', ')}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </section>
-          )}
-
-          {simple && (s.verdict || s.report) && (
-            <section id="verdict" className="entry">
-              <h2 className="font-serif text-[28px]">The answer</h2>
-              <p className="mb-2 text-sm text-ink-soft">This was a quick question, so no court was needed.</p>
-              <div className="md bar-seal"><Md>{s.report || s.verdict || ''}</Md></div>
-            </section>
-          )}
-
-          {!simple && (v || s.scores || s.status === 'summarizing') && <PlainVerdict s={s} v={v} assumption={assumption} />}
-          {sheets.length > 0 && (
-            <Suspense fallback={<div className="entry space-y-2" aria-label="Loading your numbers"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
-              {sheets.map((d) => <Numbers key={d.id} doc={d} />)}
-            </Suspense>
-          )}
-          {!simple && <PlanSection plan={s.plan} pending={s.status === 'summarizing'} title={s.text} />}
-          {!simple && <Review plan={s.plan} />}
-
-          {!simple && s.ghosts.length > 0 && (s.status === 'summarizing' || s.verdict || s.scores || s.plan || finished) && (
-            <Suspense fallback={<div className="entry space-y-2" aria-label="Loading charts"><div className="skel w-full" /><div className="skel w-5/6" /></div>}>
-              <Dashboard s={s} seconds={seconds} />
-            </Suspense>
-          )}
-
-          {s.ghosts.length > 0 && (
-            <>
-              <section id="council" className="entry">
-                <h2 className="font-serif text-[28px]">The council assembled</h2>
-                {s.problemSummary && <p className="mt-1 max-w-[68ch] font-serif text-[18px]">{s.problemSummary}</p>}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {s.ghosts.map((g, i) => (
-                    <a key={g.id} href={`#ghost-${g.id}`} className="appear chip !px-2.5 !py-1 text-sm" style={{ animationDelay: `${i * 120}ms`, borderColor: 'var(--ghost)' }}>
-                      {g.name}
-                    </a>
-                  ))}
-                </div>
-              </section>
-              <section id="testimony" className="entry">
-                <h2 className="font-serif text-[28px]">Testimony</h2>
-                <div className="mt-2 divide-y divide-hair">
-                  {s.ghosts.map((g) => <TestimonyCard key={g.id} g={g} href={`${base}/ghost/${g.id}${search}`} />)}
-                </div>
-              </section>
-            </>
-          )}
-
-          {!simple && (s.report || s.status === 'summarizing') && (
-            <section id="report" className="entry">
-              <h2 className="sr-only">Full report</h2>
-              {s.report ? (
-                <Report md={s.report} streaming={s.status === 'summarizing'} family={v?.family} />
-              ) : (
-                <div className="space-y-2" aria-label="The Soul Binder is writing">
-                  <p className="text-ink-soft">The Soul Binder is writing…</p>
-                  <div className="skel w-full" /><div className="skel w-11/12" /><div className="skel w-3/4" />
-                </div>
-              )}
-              {s.status === 'done' && (
-                <div className="no-print mt-6 flex flex-wrap gap-2 text-sm">
-                  <button className="btn btn-seal" onClick={download}>Download report (.md)</button>
-                  <button className="btn btn-line" onClick={() => print()}>Print / PDF</button>
-                  <button className="btn btn-line" onClick={() => navigator.clipboard?.writeText(location.href)}>Copy link</button>
-                  <Link className="btn btn-line" to={isMock() ? '/?mock=1' : '/'}>Start a new case</Link>
-                </div>
-              )}
-            </section>
-          )}
-
-          {(s.error || s.status === 'error') && (
-            <section className="entry" role="alert">
-              <div className="bar-seal">
-                <h2 className="font-serif text-xl fam-stop">The court couldn't finish this case</h2>
-                <p className="mt-1 text-sm text-ink-soft">{s.error || 'Something went wrong on the server.'}</p>
-                <div className="mt-3 flex gap-2 text-sm">
-                  {(s.text || s.url) && (
-                    <button className="btn btn-seal" onClick={tryAgain} disabled={retrying}>{retrying ? 'Opening…' : 'Try again'}</button>
-                  )}
-                  <Link className="btn btn-line" to="/">Start a new case</Link>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {finished && (s.text || s.report) && <FollowUpBox id={id} family={v?.family} suggested={s.plan?.suggested_followups} />}
-
-          <footer className="entry flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
-            {seconds != null && <span>Finished in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</span>}
-            {!!calls && <span>{calls} model calls</span>}
-            {!!tokens && <span>{tokens.toLocaleString()} tokens</span>}
-            <span>Status: {s.status.replace('_', ' ')}</span>
-          </footer>
         </div>
+        <footer className="entry flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
+          {seconds != null && <span>Finished in {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</span>}
+          {!!calls && <span>{calls} model calls</span>}
+          {!!tokens && <span>{tokens.toLocaleString()} tokens</span>}
+          <span>Status: {s.status.replace('_', ' ')}</span>
+        </footer>
       </div>
     </div>
   )

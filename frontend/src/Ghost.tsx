@@ -151,6 +151,7 @@ export function TestimonyPanel({ s, ghostId, base, search }: { s: CaseState; gho
       >
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-hair bg-paper px-4 py-2 text-sm sm:px-6">
           <div className="flex gap-2">
+            <button className="btn btn-line !px-2.5 !py-1" onClick={close}>← Back to case</button>
             {prev ? <Link to={href(prev)} className="btn btn-line !px-2.5 !py-1" aria-label={`Previous: ${prev.name}`}>← Prev</Link> : <span className="btn btn-line !px-2.5 !py-1 opacity-40" aria-hidden>← Prev</span>}
             {next ? <Link to={href(next)} className="btn btn-line !px-2.5 !py-1" aria-label={`Next: ${next.name}`}>Next →</Link> : <span className="btn btn-line !px-2.5 !py-1 opacity-40" aria-hidden>Next →</span>}
           </div>
