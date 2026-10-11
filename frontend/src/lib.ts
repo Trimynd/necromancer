@@ -58,6 +58,11 @@ export interface ColChange {
 export interface SheetChange {
   name: string; version_before: number; version_after: number; columns: ColChange[]
   added_columns: string[]; removed_columns: string[]; rows_before: number; rows_after: number; changed: boolean
+  /** Set when a file was swapped for a new one (update-data): the file it replaced. */
+  previous_name?: string
+  /** Every changed cell, and how the code-computed verdict moved (spreadsheets only). */
+  cells?: LedgerDiff['cells']
+  verdict?: LedgerDiff['verdict']
 }
 /** Same shape the backend sends: stats for every column whose cells are all numbers. */
 export function statsOf(t: Table): Record<string, ColStat> {
@@ -387,11 +392,57 @@ export async function connectSheet(url: string): Promise<Doc[]> {
 
 export const kindOf = (name: string) => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'xlsx' ? 'xlsx' : ext === 'docx' ? 'docx' : 'text'
+  return ext === 'pdf' ? 'pdf' : ext === 'csv' ? 'csv' : ext === 'xlsx' || ext === 'xlsm' ? 'xlsx' : ext === 'docx' ? 'docx' : 'text'
+}
+
+// ---------- Excel compare (POST /api/compare): verdicts computed in code, plus cell diffs ----------
+
+export interface LedgerVerdict {
+  overall: number | null; label: string; mode: string | null; headline: string
+  dimensions: Record<string, number>; kpis: Record<string, number>
+}
+export interface Ledger {
+  index: number; name: string; document_id: string; verdict: LedgerVerdict
+  financials: { sheet: string | null; periods: string[]; series: Record<string, (number | null)[]>; metrics: Record<string, string> }
+}
+export interface CellChange { sheet: string; row: string; column: string; a: unknown; b: unknown; delta: number | null; pct: number | null }
+export interface LedgerDiff {
+  from: number; to: number
+  cells: {
+    changes: CellChange[]; total_changed: number; paired_by: 'label' | 'position'
+    added_rows: string[]; removed_rows: string[]; added_columns: string[]; removed_columns: string[]
+  }
+  verdict: {
+    overall: { a: number | null; b: number | null; delta: number | null }
+    label: { a: string; b: string; changed: boolean }
+    dimensions: { key: string; label: string; a: number | null; b: number | null; delta: number | null }[]
+    kpis: { key: string; label: string; a: number | null; b: number | null; delta: number | null; pct: number | null }[]
+    drivers: string[]
+  }
+}
+export interface Comparison { workbooks: Ledger[]; diffs: Record<string, LedgerDiff> }
+
+/** 2-6 spreadsheets, oldest first. Throws with the server's `detail` on 400. */
+export async function compareWorkbooks(files: File[]): Promise<Comparison> {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  let res: Response
+  try {
+    res = await fetch('/api/compare', { method: 'POST', body: fd })
+  } catch {
+    throw new Error('Could not reach the backend. Is it running on port 8000?')
+  }
+  if (!res.ok) {
+    // Vite's proxy answers 5xx with no JSON when the backend isn't running.
+    let detail: unknown = res.status >= 500 ? 'The backend failed or is not running on port 8000.' : `Compare failed (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  return res.json()
 }
 export const DOC_ICON: Record<string, string> = { pdf: '📕', csv: '📊', sheet: '📗', xlsx: '📗', docx: '📘', text: '📄' }
 export const docLabel = (d: Doc) =>
-  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
+  d.table ? `${d.kind === 'sheet' ? 'Google Sheet · ' : d.kind === 'xlsx' ? 'Excel · ' : ''}${d.table.rows.length} rows × ${d.table.columns.length} columns`
     : d.pages ? `${d.pages} pages` : d.chars ? `${Math.max(1, Math.round(d.chars / 1000))}k chars` : ''
 
 export async function startCase(body: { text?: string; url?: string; depth: string; document_ids?: string[]; strict?: boolean; stage?: Stage }): Promise<string> {
@@ -433,6 +484,50 @@ export async function refreshData(id: string, body: { depth: string; strict?: bo
   }
   return (await res.json()).session_id
 }
+/** Swap one document of a finished case for a new file -> the follow-up (re-judged) session id.
+ *  409 = the new file has the same numbers. */
+export async function updateData(id: string, documentId: string, file: File, body: { depth: string; strict?: boolean }): Promise<string> {
+  const fd = new FormData()
+  fd.append('document_id', documentId)
+  fd.append('file', file)
+  fd.append('depth', body.depth)
+  fd.append('strict', String(!!body.strict))
+  let res: Response
+  try {
+    res = await fetch(`/api/session/${id}/update-data`, { method: 'POST', body: fd })
+  } catch {
+    throw new Error('Could not reach the backend. Is it running on port 8000?')
+  }
+  if (!res.ok) {
+    let detail: unknown = res.status >= 500 ? 'The backend failed or is not running on port 8000.' : `Couldn't read the new file (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw Object.assign(new Error(typeof detail === 'string' ? detail : JSON.stringify(detail)), { status: res.status })
+  }
+  return (await res.json()).session_id
+}
+export const updateQuestion = (oldName: string, newName: string, v: number) =>
+  `I uploaded a new version of my data (${oldName} → ${newName}, version ${v}). What changed, does it change the verdict, and what should I do now?`
+
+/** A shared Google Sheet as an .xlsx File (every tab, via the backend), so it can join the ledger comparison like an upload. */
+export async function sheetAsFile(url: string): Promise<File> {
+  let res: Response
+  try {
+    res = await fetch('/api/connectors/google-sheet/file', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+    })
+  } catch {
+    throw new Error('Could not reach the backend. Is it running on port 8000?')
+  }
+  if (!res.ok) {
+    let detail: unknown = `Couldn't read that sheet (${res.status}).`
+    try { detail = (await res.json()).detail ?? detail } catch { /* not json */ }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+  }
+  const cd = res.headers.get('content-disposition') ?? ''
+  const name = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? 'Google Sheet.xlsx')
+  return new File([await res.blob()], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+
 /** The backend words a refresh turn "My numbers were updated (version N)…": show it as "Data update vN". */
 export const dataUpdateLabel = (q?: string | null) => q?.match(/^My numbers were updated \(version (\d+)\)/)?.[1]
 export const refreshQuestion = (v: number) => `My numbers were updated (version ${v}). What changed, does it change the verdict, and what should I do now?`

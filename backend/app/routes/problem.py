@@ -2,14 +2,14 @@ import asyncio
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from app.agents.orchestrator import Orchestrator
 from app.models.session import SessionState
 from app.services import history
-from app.services.data_diff import diff_stats
-from app.services.documents import DocumentError
+from app.services.data_diff import diff_docs
+from app.services.documents import DocumentError, extract
 from app.services.google_sheets import read_sheet
 from app.state import blackboard, documents, sessions
 
@@ -126,9 +126,7 @@ async def refresh_data(session_id: str, req: RefreshRequest) -> ProblemResponse:
         doc["version"] = int(old.get("version") or 1) + 1
         documents[doc["id"]] = doc
         fresh.append(doc)
-        d = diff_stats(old.get("stats") or {}, doc.get("stats") or {},
-                       len((old.get("table") or {}).get("rows") or []), len((doc.get("table") or {}).get("rows") or []))
-        diffs.append({"name": doc["name"], "version_before": doc["version"] - 1, "version_after": doc["version"], **d})
+        diffs.append(diff_docs(old, doc))
     if not any(d["changed"] for d in diffs):
         raise HTTPException(status_code=409, detail="Your sheet hasn't changed since the last analysis.")
     others = [d for d in parent.get("documents") or [] if d not in sheets]
@@ -138,6 +136,35 @@ async def refresh_data(session_id: str, req: RefreshRequest) -> ProblemResponse:
         depth=req.depth, strict=req.strict)
     resp = await followup(session_id, req_followup, _override_docs=(others, fresh), _data_diff=diffs)
     return resp
+
+
+@router.post("/api/session/{session_id}/update-data", response_model=ProblemResponse)
+async def update_data(
+    session_id: str, document_id: str = Form(...), file: UploadFile = File(...),
+    depth: Literal["fast", "deep"] = Form("fast"), strict: bool = Form(False),
+) -> ProblemResponse:
+    """Swap one document of this case for a new file (next month's Excel, a corrected sheet...),
+    compute what changed by code (cells, stats, verdict), and re-judge in a follow-up turn."""
+    parent = lookup(session_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="Unknown session_id")
+    old = next((d for d in parent.get("documents") or [] if d.get("id") == document_id), None)
+    if old is None:
+        raise HTTPException(status_code=400, detail="That document isn't part of this case.")
+    try:
+        new = extract(file.filename or "data", await file.read())
+    except DocumentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    new["version"] = int(old.get("version") or 1) + 1
+    documents[new["id"]] = new
+    diff = diff_docs(old, new)
+    if not diff["changed"]:
+        raise HTTPException(status_code=409, detail="That file has the same numbers as the one already in this case.")
+    others = [d for d in parent.get("documents") or [] if d.get("id") != document_id]
+    question = (f"I uploaded a new version of my data ({old.get('name')} → {new['name']}, version {new['version']}). "
+                "What changed, does it change the verdict, and what should I do now?")
+    return await followup(session_id, FollowupRequest(question=question, depth=depth, strict=strict),
+                          _override_docs=(others, [new]), _data_diff=[diff])
 
 
 @router.post("/api/session/{session_id}/followup", response_model=ProblemResponse)

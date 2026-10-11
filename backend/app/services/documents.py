@@ -13,13 +13,15 @@ from docx import Document
 import openpyxl
 from pypdf import PdfReader
 
+from app.services.spreadsheets import SpreadsheetError, financials, read_sheets, verdict
+
 MAX_FILES = 3
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PDF_PAGES = 10
 MAX_CHARS = 20_000  # per document, before it is chunked into evidence
 CSV_ROWS = 200
 
-KINDS = {".pdf": "pdf", ".csv": "csv", ".txt": "text", ".md": "text", ".docx": "docx", ".xlsx": "xlsx"}
+KINDS = {".pdf": "pdf", ".csv": "csv", ".txt": "text", ".md": "text", ".docx": "docx", ".xlsx": "xlsx", ".xlsm": "xlsx"}
 
 
 class DocumentError(ValueError):
@@ -170,6 +172,8 @@ def extract(name: str, data: bytes) -> dict:
             text = data.decode("utf-8", errors="replace")
     except DocumentError:
         raise
+    except SpreadsheetError as exc:
+        raise DocumentError(str(exc)) from exc
     except Exception as exc:
         raise DocumentError(f"{name}: could not be read ({type(exc).__name__})") from exc
     text = " ".join(text.split()) if kind not in ("csv", "xlsx") else text.strip()
@@ -187,7 +191,24 @@ def extract(name: str, data: bytes) -> dict:
         doc.update(table=main["table"], stats=main["stats"], main_tab=main["name"],
                    tabs=[{"name": t["name"], "columns": t["table"]["columns"], "rows": len(t["table"]["rows"]),
                           "numeric_columns": list(t["stats"])} for t in tabs])
+    if kind in ("csv", "xlsx"):
+        _add_ledger(doc, read_sheets(name, data))
     return doc
+
+
+def _add_ledger(doc: dict, sheets: list[dict]) -> None:
+    """Code-computed health verdict (spreadsheets.verdict), kept so a later version can be diffed against it."""
+    try:
+        fin = financials(sheets)
+    except Exception:  # an odd sheet still counts as evidence, just without a verdict
+        return
+    if not fin["series"]:
+        return
+    doc["financials"] = {"periods": fin["periods"], "series": fin["series"]}
+    doc["ledger"] = v = verdict(fin)
+    if v["overall"] is not None:
+        dims = ", ".join(f"{k} {s}/10" for k, s in v["dimensions"].items())
+        doc["text"] = f"CODE HEALTH SCORE (exact, from these numbers): {v['overall']}/100 {v['label']} ({dims})\n" + doc["text"]
 
 
 def _stats_brief(stats: dict) -> str:

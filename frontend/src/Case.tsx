@@ -11,7 +11,7 @@ import {
 import { MOCK_SHEET, MOCK_TEXT, playMock } from './mock'
 import { FollowUpBox, LiveSteps, Thread } from './Thread'
 import { explainLabel, Gauge, PlainVerdict, PlanSection, Review } from './Plan'
-import { DataChanged, SheetRefresh } from './Sheet'
+import { DataChanged, SheetRefresh, UpdateData } from './Sheet'
 
 // recharts is the heavy part of the bundle; only fetch it once a case has something to chart.
 const loadDashboard = () => import('./Dashboard')
@@ -509,6 +509,7 @@ ${planMd(s.plan)}
         <Review plan={s.plan} top={3} />
         {actions}
         {s.status === 'done' && sheetDocs.length > 0 && <SheetRefresh id={id} sheets={sheetDocs} />}
+        {s.status === 'done' && !!s.documents?.length && <UpdateData id={id} docs={s.documents} />}
       </>
     ),
     plan: (
@@ -546,6 +547,7 @@ ${planMd(s.plan)}
         {finished && (s.text || s.report) ? <FollowUpBox id={id} family={v?.family} suggested={s.plan?.suggested_followups} />
           : <section className="entry text-ink-soft">You can ask a follow-up once the verdict is in.</section>}
         {s.status === 'done' && sheetDocs.length > 0 && <SheetRefresh id={id} sheets={sheetDocs} />}
+        {s.status === 'done' && !!s.documents?.length && <UpdateData id={id} docs={s.documents} />}
         <p className="entry text-sm"><Link className="text-seal underline" to={isMock() ? '/?mock=1' : '/'}>Start a new case</Link></p>
       </>
     ),

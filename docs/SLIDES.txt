@@ -1,0 +1,401 @@
+PROJECT NECROMANCER - 10 SLIDE SPOOKY DECK
+Slide text and image directions
+
+====================================================================
+
+HOW EACH SLIDE IS WRITTEN
+
+TITLE - the big heading
+TEXT - the words that go on the slide
+IMAGE - what the picture shows, where it sits, how big it is
+SAY - what the presenter says out loud
+
+Every image follows the same look:
+- Dark gothic, almost black background with drifting fog
+- Glowing teal and cyan light as the main colour
+- Mode colours: green for Launch, blue for Grow, amber for Rescue,
+  violet for Revive, red for the Inquisitor and danger
+- Ghosts are see-through, glowing, wearing hooded cloaks with faint
+  circuit-line patterns
+- No words or letters inside the images
+- One side of each image left dark and empty so the slide text can
+  sit on top
+
+Fonts: Cinzel Decorative for titles, IBM Plex Sans for text,
+IBM Plex Mono for numbers and logs.
+
+====================================================================
+
+SLIDE 1 - THE AWAKENING
+
+TITLE
+Project Necromancer
+
+TEXT
+From idea to afterlife.
+We summon an army of ghost agents to judge your business:
+newborn, thriving, bleeding out, or already buried.
+[Team names] - [Hackathon name]
+
+IMAGE
+Shows: a hooded necromancer standing in a misty digital graveyard at
+midnight. They raise a staff made of twisted circuits with a glowing
+teal crystal on top. Gravestones look like old server racks. Thin
+see-through ghosts are rising out of the graves around them. The
+face is hidden in shadow, only two glowing cyan eyes.
+Placement: fills the whole slide, edge to edge.
+Text position: title and subtitle over the dark bottom third.
+Mood: powerful, mysterious, the start of a ritual.
+
+SAY
+"Every business walks the same lifeline: it is born, it grows, it
+bleeds, and sometimes it dies. We built a necromancer for all of it.
+Tell it about your business and it summons an army of ghost agents
+to tell you where you stand and what to do next."
+
+====================================================================
+
+SLIDE 2 - THE CURSE
+
+TITLE
+Every business is killed by a Cursed Assumption
+
+TEXT
+- Founders bury their savings under beliefs they never tested
+- Shopkeepers watch sales bleed and cannot name the wound
+- Consultants cost a fortune. Chatbots give everyone the same answer.
+"We find the curse before you spend a single rupee."
+
+IMAGE
+Shows: an endless foggy graveyard at night. Against every gravestone
+rests a cracked lightbulb, faintly glowing teal, like the last light
+of a dead idea. In front, one tall gravestone with a raven sitting
+on top, its eyes glowing cyan. Bare twisted trees and a pale moon.
+Placement: left 55% of the slide, full height.
+Text position: bullets on the right 45%; the quote in a red-bordered
+box at the bottom right.
+Mood: sad, quiet, haunting.
+
+SAY
+"No business dies all at once. It dies on a belief it never tested,
+like 'students will pay this price' or 'discounts will bring them
+back'. Today you either pay a consultant a fortune or ask a chatbot
+that tells everyone the same thing."
+
+(Don't quote a failure-rate percentage unless you can show where it
+comes from.)
+
+====================================================================
+
+SLIDE 3 - THE FOUR RITUALS
+
+TITLE
+One necromancer, four rituals, every stage of life
+
+TEXT
+The Genesis Ritual (Launch) - Shall this idea be granted life?
+The Blood Pact (Grow) - Where can it grow, and what hunts it?
+The Emergency Exorcism (Rescue) - Why is its life-force draining?
+Digital Necromancy (Revive) - Why did it die, and can it rise again?
+
+IMAGE
+Shows: a glowing heartbeat line running across a dark misty moor.
+It starts at a small sprouting seedling in green light, climbs to a
+tall glowing tower in blue light, falls through a stormy amber zone,
+goes flat beside a stone coffin, then rises again in violet light
+out of an open grave.
+Placement: fills the whole slide as the background.
+On top: four glowing circles placed on the line (green, blue, amber,
+violet), each with its ritual name and question underneath.
+Mood: the full life and death of a business in one picture.
+
+SAY
+"The necromancer reads your words and senses where you are on the
+lifeline. The Genesis Ritual for a new idea, the Blood Pact for a
+company that's working, the Emergency Exorcism when the numbers are
+falling, and Digital Necromancy when the business is already dead."
+
+====================================================================
+
+SLIDE 4 - THE SUMMONING CIRCLE
+
+TITLE
+No two armies are alike
+
+TEXT
+The Role Maker reads your business and conjures the ghosts it needs.
+Dying phone shop: Rival Scout, EMI Inquisitor, Forensic Accountant
+Student tiffin startup: Logistics Wraith, Pricing Seer, FSSAI Warden
+BNPL app: Credit Phantom, RBI Lich, Unit-Economics Oracle
+
+IMAGE (the main Necromancer image)
+Shows: the necromancer in a dark hooded robe at the centre of a huge
+glowing teal summoning circle carved into a crypt floor with runes
+and circuit patterns. Arms raised, staff blazing. An army of
+see-through ghosts spirals up out of the circle. Every ghost is
+different: one holds a magnifying glass, one an open ledger, one a
+balance scale, one a shield, one a rolled map, one a lantern. They
+glow cyan, green, amber and violet. Gothic pillars and hanging
+chains behind, fog spilling over the edge of the circle.
+Placement: top two-thirds of the slide, full width.
+Text position: the three example teams as three glowing cards in a
+row along the bottom third.
+Mood: epic, the big "wow" moment.
+
+SAY
+"This is the heart of the spell. Other multi-agent tools use the same
+fixed team every time. Our Role Maker, powered by Gemma, reads your
+business and decides how many ghosts to raise and what each one
+hunts. A dying phone shop gets a rival scout and an EMI inquisitor.
+A tiffin startup gets a food-safety warden. A new army every time."
+
+====================================================================
+
+SLIDE 5 - THE HUNT
+
+TITLE
+The ghosts scry the web and bring back proof
+
+TEXT
+- Every ghost hunts its own mission, all at the same time
+- What they find is written on the Blackboard, a shared memory every
+  ghost can read
+- No claim without proof: every fact carries its source
+
+Live feed (demo data):
+13:08:04 Rival Scout - a chain store opened 1.2 km away
+13:08:09 Forensic Accountant - mid-range sales fell, premium held
+13:08:14 EMI Inquisitor - single-bank EMI drives buyers away
+
+IMAGE (the army of ghost agents at work)
+Shows: an army of see-through glowing ghosts floating through an
+endless haunted library whose shelves disappear into darkness. Each
+ghost reads a different floating glowing page, scroll or web window.
+Thin threads of light run from every page to a large crystal orb
+floating in the middle, which collects all the knowledge. Many
+ghosts at different distances: close ones sharp, far ones faint like
+smoke.
+Placement: right 60% of the slide, full height.
+Text position: bullets on the top left; the live feed in a black
+terminal-style box on the bottom left, in mono font.
+Mood: busy, magical, everyone working at once.
+
+SAY
+"Once raised, the ghosts hunt in parallel. Each one searches the web
+for its own mission and writes what it finds onto the Blackboard, a
+shared memory all the others can read. Every claim must come with a
+source. If we can't show where it came from, we don't say it."
+
+====================================================================
+
+SLIDE 6 - THE SPECTRAL COURTROOM
+
+TITLE
+The ghosts argue. The Judge decides.
+
+TEXT
+1. Each ghost presents its case: claim, evidence, how sure it is
+2. The Judge accepts it, or sends it back: "Bring better proof."
+3. Ghosts sent back return to the hunt with the Judge's guidance
+4. The Judge announces the verdict
+
+IMAGE (ghosts talking to each other and taking decisions)
+Shows: a grand gothic courtroom inside a ruined cathedral. On a high
+stone bench sits a huge ghostly Judge in flowing robes with glowing
+cyan eyes, raising a gavel made of light. Below, a half-circle of
+see-through ghosts argue with each other and present evidence: one
+points at a floating glowing chart, one holds up a glowing scroll,
+two lean toward each other mid-debate, one raises a hand to object.
+Beams of teal light pass between the ghosts as they speak. Broken
+stained-glass windows glow faint violet, fog rolls over the floor.
+Placement: fills the whole slide.
+Text position: the four steps in a see-through dark strip along the
+bottom, numbered with glowing cyan circles.
+Mood: dramatic, a trial in progress.
+
+SAY
+"Then the ghosts stand trial. Each presents its case: what it claims,
+its evidence and how sure it is. The Judge, our biggest model, rules
+on every case. A weak or off-topic case is sent back with exact
+guidance, and that ghost goes back to research. Only then does the
+Judge announce the verdict."
+
+====================================================================
+
+SLIDE 7 - THE GRAND INQUISITOR
+
+TITLE
+The Grand Inquisitor tries to kill your plan
+
+TEXT
+Launch: "Twelve months from now, you are dead. Why?"
+Grow: "How would a rival tear you apart?"
+Rescue: "Why will the rescue fail too?"
+Revive: "Why will it die a second time?"
+Fate: Survives - Survives with changes - Perishes
+
+IMAGE
+Shows: a frightening ghostly Grand Inquisitor in torn red and black
+robes and a tall pointed hood. The face is hidden, only burning red
+eyes. A bony finger points straight at the viewer. Behind them, a
+storm of red-lit papers and charts being ripped apart by a ghostly
+wind. Teal fog curls along the floor.
+Placement: left half of the slide, full height. Give the whole slide
+a dark red tint.
+Text position: the four attacks as four red-bordered cards on the
+right half; the fate line underneath.
+Mood: threatening, the plan is under attack.
+(You can also use frontend/public/assets/inquisitor.jpg.)
+
+SAY
+"Before any verdict, the Grand Inquisitor tries to kill your plan, and
+the attack changes with the ritual. It drags your riskiest assumption
+into the light and tells you the cheapest way to test it."
+
+(If a judge asks: the separate Inquisitor step is designed and shown
+in the app, but in today's backend the Judge does this job.)
+
+====================================================================
+
+SLIDE 8 - THE TOME OF PROPHECY
+
+TITLE
+The Tome of Prophecy
+
+TEXT
+Verdict out of 100 - The Cursed Assumption - Pros and cons - Rivals
+Market size - Treasury and runway - 24-month forecast - Licences
+30/60/90-day plan - Every source
+
+The spirits estimate. Cold arithmetic decides.
+Move a lever and the prophecy changes live.
+
+IMAGE
+Shows: an old leather spellbook floating open above a stone altar.
+Its pages glow with charts drawn in teal and gold light: a round
+gauge, rising and falling lines, small tables. Wisps of glowing smoke
+swirl around it, black candles drip on the altar, fog below.
+Placement: right 40% of the slide.
+Also on this slide: a screenshot of the real report screen (verdict
+gauge and slider sandbox) in a glowing frame on the left 60%. Take it
+from the running app: npm run dev, Phone Shop sample, Report.
+Text position: the section list as small chips under the screenshot;
+the rule line in cyan at the bottom.
+Mood: the answer revealed.
+
+SAY
+"The ghosts change every time, but the Tome doesn't. A verdict, your
+riskiest assumption, your rivals, your market, how long your money
+lasts and a 24-month forecast. Our first law: the AI only estimates
+the assumptions, plain code does the maths. Drag the EMI partners
+lever from one to five and the verdict turns green instantly, with no
+AI call."
+
+====================================================================
+
+SLIDE 9 - THE EXORCISM
+
+TITLE
+Case file: a phone shop bleeding out
+
+TEXT
+Sales fell from Rs 18L to Rs 9L a month. Rs 12L left in the bank.
+What's killing it:
+- A rival megastore opened nearby (outside force)
+- Buyers drifting to online apps (outside force)
+- EMI from only one bank (inside, curable)
+- "Discounts will bring them back" (the cursed assumption)
+THE ONE RITUAL: sign 3 more EMI partners this week. Stop discounts.
+Prophecy: RECOVERABLE
+(illustrative demo data)
+
+IMAGE
+Shows: a small neighbourhood phone shop on a rainy Indian city street
+at night. The neon sign flickers, half the lights are dead. A faint
+amber heartbeat line runs across the shop window, sinking toward a
+flatline. A see-through ghost floats at the door, holding a lantern
+and studying a glowing ledger.
+Placement: small, top right corner, about one quarter of the slide.
+Also on this slide: a falling amber sales chart with red flag markers
+("Feb: rival opens", "Mar: discounts begin") on the left half. Take
+it from the app's Rescue report or draw it in PowerPoint.
+Text position: the causes as a ranked list on the right under the
+image; THE ONE RITUAL in a big glowing amber box across the bottom.
+Mood: urgent, but there is a way out.
+
+SAY
+"Here's our Rescue example. Two phone shops in Pune, sales cut in
+half. The ghosts found the problem wasn't everywhere: buyers who
+needed EMI went to a new megastore that offers it through many
+banks. Discounts only burned the cash faster. So instead of ten
+fixes, we give one: sign three more EMI partners this week and stop
+the discounts."
+
+====================================================================
+
+SLIDE 10 - THE RISING
+
+TITLE
+An army for every business owner
+
+TEXT
+Already raised: a Role Maker that builds a new team every time, a
+courtroom with a Judge, sourced research, live forecast sliders,
+four rituals
+Rising next: a WhatsApp bot, snap a photo of a paper ledger, speak in
+Hindi and other Indian languages, monthly warnings, a government
+scheme finder
+
+From idea to afterlife.
+Same ritual. Four stages of life. A new army every time.
+[GitHub link] [QR code]
+
+IMAGE
+Shows: the necromancer seen from behind, standing on a cliff at the
+edge of the graveyard at dawn, staff in hand, looking over a huge
+glowing city of small shops and homes. Behind them stands a whole
+army of see-through ghosts in rows, glowing teal, green, amber and
+violet, ready to march down to the city. The first red-gold sunrise
+breaks through the fog on the horizon.
+Placement: fills the whole slide, slightly darkened.
+Text position: two glowing boxes in the upper half ("Already raised"
+in cyan, "Rising next" in violet); the tagline large at the bottom
+centre; QR code in the bottom right corner.
+Mood: hopeful ending, the army is ready.
+
+SAY
+"Today the necromancer lives on the web, with four rituals and a new
+army for every business. Next, we take it to WhatsApp, where shop
+owners already are: send a photo of your ledger, ask in Hindi, and get
+the one thing to do this week. From idea to afterlife. Thank you."
+
+====================================================================
+
+IMAGES AT A GLANCE
+
+Slide 1 - Necromancer raising ghosts in a graveyard - full slide
+Slide 2 - Graveyard of dead-idea lightbulbs and a raven - left 55%
+Slide 3 - Heartbeat line from seedling to coffin to rebirth - full
+          background
+Slide 4 - Necromancer summoning the ghost army in a circle - top 2/3
+Slide 5 - Ghost army researching in a haunted library - right 60%
+Slide 6 - Ghosts debating before a ghostly Judge - full slide
+Slide 7 - Grand Inquisitor pointing at the viewer - left half, red
+          tint
+Slide 8 - Glowing spellbook on an altar plus an app screenshot -
+          right 40%
+Slide 9 - Haunted phone shop at night plus a sales chart - top right
+          quarter
+Slide 10 - Necromancer and ghost army at dawn over a city - full
+           slide
+
+====================================================================
+
+BEFORE PRESENTING
+
+- Numbers on slides 5 and 9 are marked as demo data
+- No failure-rate statistic without a source
+- Screenshots on slides 8 and 9 come from the running app
+- QR code and repo link on slide 10 work
+- All images use the same dark teal look so they feel like one set
+- Full run-through under 3 minutes, twice

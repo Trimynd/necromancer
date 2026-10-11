@@ -26,7 +26,14 @@ def parse_url(url: str) -> tuple[str, str]:
 
 
 async def read_sheet(url: str) -> dict:
-    sheet_id, gid = parse_url(url)
+    title, data, source = await fetch_xlsx(url)
+    doc = extract(f"{title}.xlsx", data)
+    return {**doc, "name": title, "kind": "sheet", "source": source}
+
+
+async def fetch_xlsx(url: str) -> tuple[str, bytes, str]:
+    """(title, .xlsx bytes of every tab, canonical sheet link) for a sheet shared as "Anyone with the link"."""
+    sheet_id, _ = parse_url(url)
     # xlsx export = every tab + calculated values; the CSV export only gives one tab and returns
     # HTTP 400 for some sheets even when they're shared publicly.
     export = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
@@ -47,8 +54,7 @@ async def read_sheet(url: str) -> dict:
             title = found.group(1).strip() if found else title
         except httpx.HTTPError:
             pass
-    doc = extract(f"{title}.xlsx", resp.content)
-    return {**doc, "name": title, "kind": "sheet", "source": f"https://docs.google.com/spreadsheets/d/{sheet_id}"}
+    return title, resp.content, f"https://docs.google.com/spreadsheets/d/{sheet_id}"
 
 
 if __name__ == "__main__":

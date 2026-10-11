@@ -1,8 +1,11 @@
-from fastapi import APIRouter, HTTPException, UploadFile
+import re
+from urllib.parse import quote
+
+from fastapi import APIRouter, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from app.services.documents import MAX_FILES, DocumentError, extract
-from app.services.google_sheets import read_sheet
+from app.services.google_sheets import fetch_xlsx, read_sheet
 from app.state import documents
 
 router = APIRouter(tags=["documents"])
@@ -44,3 +47,15 @@ async def connect_google_sheet(req: SheetRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     documents[doc["id"]] = doc
     return {"documents": [public(doc)]}
+
+
+@router.post("/api/connectors/google-sheet/file")
+async def google_sheet_file(req: SheetRequest) -> Response:
+    """The shared sheet as an .xlsx file (every tab), so the browser can add it to the ledger comparison like an upload."""
+    try:
+        title, data, _ = await fetch_xlsx(req.url)
+    except DocumentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    name = " ".join(re.sub(r'[\\/:*?"<>|]+', " ", title).split()) or "Google Sheet"
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}.xlsx"})
