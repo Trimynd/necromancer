@@ -378,10 +378,14 @@ export function Home() {
 }
 
 /** Root cases, newest first, with their follow-ups nested underneath (oldest first). */
+const PER_PAGE = 6
+
 function RecentCases({ recent }: { recent: Recent[] }) {
-  if (!recent.length) return null
   const ids = new Set(recent.map((r) => r.id))
-  const roots = recent.filter((r) => !r.root || !ids.has(r.root)).slice(0, 6)
+  const allRoots = recent.filter((r) => !r.root || !ids.has(r.root))
+  const pages = Math.max(1, Math.ceil(allRoots.length / PER_PAGE))
+  const [page, setPage] = useState(0)
+  const roots = allRoots.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE)
   const kids = (id: string) => recent.filter((r) => r.root === id).sort((a, b) => a.at - b.at)
   const row = (r: Recent, child: boolean) => {
     const fam = r.verdict ? familyOf(r.verdict) : undefined
@@ -400,9 +404,20 @@ function RecentCases({ recent }: { recent: Recent[] }) {
     <section aria-labelledby="recent-h" className="sheet p-5">
       <p className="eyebrow">From the graveyard</p>
       <h2 id="recent-h" className="mt-1 font-serif text-xl font-semibold">Recent cases</h2>
+      {!recent.length && <p className="mt-2 text-sm text-ink-soft">Your past cases will appear here.</p>}
       <ul className="mt-1 divide-y divide-hair">
         {roots.map((r) => [row(r, false), ...kids(r.id).map((k) => row(k, true))])}
       </ul>
+      {pages > 1 && (
+        <nav aria-label="Recent cases pages" className="mt-3 flex flex-wrap items-center gap-1 text-sm">
+          <button type="button" className="btn btn-line !px-2 !py-0.5" disabled={page === 0} onClick={() => setPage(page - 1)}>← Prev</button>
+          {Array.from({ length: pages }, (_, i) => (
+            <button key={i} type="button" aria-current={i === page ? 'page' : undefined}
+              className={`btn !px-2 !py-0.5 ${i === page ? 'btn-seal' : 'btn-line'}`} onClick={() => setPage(i)}>{i + 1}</button>
+          ))}
+          <button type="button" className="btn btn-line !px-2 !py-0.5" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>Next →</button>
+        </nav>
+      )}
     </section>
   )
 }
