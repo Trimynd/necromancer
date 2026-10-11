@@ -12,6 +12,8 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     temperature: float = 0.7
     priority: int = 1
+    # Searches the orchestrator runs for this ghost BEFORE it argues: [{"query": ..., "sources": [...]}]
+    research: list[dict] = Field(default_factory=list)
 
 
 class AgentManifest(BaseModel):

@@ -1,7 +1,7 @@
 import json
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.config import settings
 from app.services.gemma_client import GemmaClient
@@ -26,11 +26,13 @@ CASES (source_types = distinct kinds of sources each ghost actually cited):
 ROLLING EVIDENCE WINDOW (what was scraped this round and last, best matches first):
 {window}
 
-Rule on every ghost's case:
-- "accept": on-topic, and key claims are backed by 2+ independent source types.
-- "retry": off-topic, unsupported, contradicted by the evidence window, or a key
-  claim rests on a single source. Say exactly what to search next and which
-  source types are missing (web, news, reddit, hackernews, wikipedia, finance, jobs, reviews).
+Rule on every ghost's case, on its merits. Use your own judgement; there is no checklist.
+- "accept" when the case is on-topic and its key claims are believable given the evidence.
+  Independent sources make a claim stronger; note single-source claims in "reason",
+  but they are not on their own a reason to send a strong case back.
+- "retry" only when the case is off-topic, unsupported, contradicted by the evidence window,
+  or its research clearly failed. Then say exactly what to search next and which source
+  types would help (web, news, reddit, hackernews, wikipedia, finance, jobs, reviews, economy, google).
 Grade search_quality 0.0-1.0 (relevance, diversity, freshness of sources).
 
 Respond with STRICT JSON only:
@@ -38,35 +40,27 @@ Respond with STRICT JSON only:
   "search_quality": 0.0, "missing_sources": ["..."], "needs_more": "exact next search",
   "guidance": "what to fix in the argument"}}]}}"""
 
-VERDICT_TASK = """QUESTION: {question}
+REPORT_TASK = """QUESTION: {question}
 
 CASES (with your rulings):
 {cases}
 
-Bind the ghosts' offerings into the final verdict:
-1. Decision: GO / PIVOT / NO-GO (or the direct answer if it is not a go/no-go question) and a 0-100 confidence.
-2. The answer and which ghosts' offerings it rests on, and why.
-3. Which offerings were weaker or only single-sourced — say so explicitly.
-4. Key risks. Be decisive."""
+Bind the ghosts' offerings into ONE markdown report. Start with the verdict so it can be read first:
 
-SUMMARY_TASK = """QUESTION: {question}
-
-CASES:
-{cases}
-
-VERDICT:
-{verdict}
-
-Write a detailed summary report in markdown with sections:
-1. Question & context
-2. Evidence presented (per ghost: claims, source types used, links)
-3. Soul Binder rulings (accepted / sent back, search quality, what was missing)
-4. Final verdict
-5. Market & competitors: a markdown table | Company | Listed? (ticker) | What they do | Status / key number | Source |
-   covering every company the evidence mentions (incumbents, rivals, failed peers). Never invent tickers or numbers;
-   write "n/a" when the evidence doesn't give one.
-6. Risks & open questions (flag single-source claims)
-7. Recommended next steps"""
+## 1. Verdict
+GO / PIVOT / NO-GO (or the direct answer if it is not a go/no-go question), a 0-100 confidence,
+which ghosts' offerings it rests on and why, which were weaker or single-sourced. Be decisive.
+Keep separate events separate: never merge two causes into one story unless the evidence links them.
+Say \"alleged\" for allegations that are not findings.
+## 2. Question & context
+## 3. Evidence presented (per ghost: claims, source types used, links)
+## 4. Soul Binder rulings (accepted / sent back, search quality, what was missing)
+## 5. Market & competitors
+A markdown table | Company | Listed? (ticker) | What they do | Status / key number | Source link |
+covering every company the evidence mentions (incumbents, rivals, failed peers). Never invent tickers or
+numbers; write "n/a" when the evidence doesn't give one.
+## 6. Risks & open questions (flag single-source claims)
+## 7. Recommended next steps"""
 
 
 class Ruling(BaseModel):
@@ -77,6 +71,22 @@ class Ruling(BaseModel):
     missing_sources: list[str] = Field(default_factory=list)
     needs_more: str = ""
     guidance: str = ""
+
+    # Accepted cases come back with "needs_more": null etc.; that's "nothing to add", not malformed.
+    @field_validator("reason", "needs_more", "guidance", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return "" if v is None else v
+
+    @field_validator("missing_sources", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return [] if v is None else v
+
+    @field_validator("search_quality", mode="before")
+    @classmethod
+    def _none_to_default(cls, v):
+        return 0.5 if v is None else v
 
 
 class SoulBinder:
@@ -93,10 +103,12 @@ class SoulBinder:
             return await self._ask(task, temperature, think=False)
         return resp["text"]
 
-    async def rule(self, question: str, cases: dict[str, dict], window: list[dict] | None = None) -> dict[str, Ruling]:
+    async def rule(
+        self, question: str, cases: dict[str, dict], window: list[dict] | None = None, think: bool = True
+    ) -> dict[str, Ruling]:
         text = await self._ask(
             RULING_TASK.format(question=question, cases=_fmt(cases), window=_fmt_window(window or [])),
-            temperature=0.2,
+            temperature=0.2, think=think,
         )
         rulings: dict[str, Ruling] = {}
         try:
@@ -111,11 +123,12 @@ class SoulBinder:
         # Any ghost the Soul Binder skipped is accepted rather than silently dropped.
         return {aid: rulings.get(aid, Ruling(agent_id=aid, decision="accept", reason="(no ruling given)")) for aid in cases}
 
-    async def verdict(self, question: str, cases: dict[str, dict]) -> str:
-        return await self._ask(VERDICT_TASK.format(question=question, cases=_fmt(cases)))
-
-    async def summarize(self, question: str, cases: dict[str, dict], verdict: str) -> str:
-        return await self._ask(SUMMARY_TASK.format(question=question, cases=_fmt(cases), verdict=verdict), think=False)
+    def report(self, question: str, cases: dict[str, dict]):
+        """Stream the final report (verdict first). Minimal thinking: the hard reasoning
+        already happened in the rulings, and thinking would delay the first visible word."""
+        return self.gemma.stream(
+            system_prompt=SOUL_BINDER_PROMPT, user_message=REPORT_TASK.format(question=question, cases=_fmt(cases)),
+        )
 
 
 def _fmt(cases: dict[str, dict]) -> str:

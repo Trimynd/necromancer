@@ -9,6 +9,7 @@ question -> Router (topic / simple|complex / needs_web)
 """
 
 import asyncio
+import re
 from collections import Counter
 
 from app.agents.soul_binder import SoulBinder
@@ -19,8 +20,9 @@ from app.config import settings
 from app.models.session import SessionState, SessionStatus
 from app.services import db, memory
 from app.services.blackboard import Blackboard
-from app.services.gemma_client import GemmaClient, usage_counter
-from app.services.research import web_research
+from app.services.listings import companies_markdown, verify_companies
+from app.services.gemma_client import GemmaClient, call_log, usage_counter
+from app.services.research import research_mode, web_research
 from app.services.scraper import scrape
 from app.utils.json_parser import JSONExtractionError, extract_json
 from app.utils.logger import get_logger
@@ -35,14 +37,31 @@ do exactly that research, then report in full detail what you searched and found
 
 Respond with STRICT JSON only:
 {"claim": "your position in 1-3 sentences",
- "evidence": [{"fact": "...", "source": "url", "source_type": "web|news|reddit|hackernews|wikipedia|finance|jobs|reviews"}],
+ "evidence": [{"fact": "...", "source": "url", "source_type": "web|news|reddit|hackernews|wikipedia|finance|jobs|reviews|economy|google"}],
  "search_log": {"queries": ["..."], "sources_hit": {"news": 3, "web": 2}, "unknowns": ["what you still could not verify"]},
  "confidence": 0.0-1.0,
  "emotion": "your conviction/stance in a few words, e.g. 'cautiously optimistic'"}"""
 
-SOURCE_TYPES = {"web", "news", "reddit", "hackernews", "wikipedia", "finance", "jobs", "reviews"}
+SOURCE_TYPES = {"web", "news", "reddit", "hackernews", "wikipedia", "finance", "jobs", "reviews", "economy", "google"}
 
-DIRECT_PROMPT = "You are a precise fintech assistant. Answer directly and concisely. Use the evidence if given; cite sources."
+DIRECT_PROMPT = "You are a precise business analyst. Answer directly and concisely. Use the evidence if given; cite sources."
+
+
+def _budget(coro, seconds: float):
+    """Optional per-ghost time limit; 0 (the default) means wait for every ghost."""
+    return asyncio.wait_for(coro, seconds) if seconds else coro
+
+
+def _evidence_digest(results: list[dict], per_query: int = 4) -> list[dict]:
+    """Top evidence per search, trimmed: gist + provenance is what the ghost needs to argue."""
+    return [{"text": e["text"][:300], "source": e["source"], "source_type": e["source_type"]}
+            for r in results for e in r.get("evidence", [])[:per_query]]
+
+
+def extract_verdict(report: str) -> str:
+    """The report starts with '## 1. Verdict'; that section is the verdict."""
+    match = re.search(r"#+\s*1\.?\s*Verdict\s*\n(.*?)(?=\n#+\s*2\.|\Z)", report, re.S | re.I)
+    return (match.group(1) if match else report).strip()
 
 
 def attach_research(case: dict, ghost) -> dict:
@@ -120,9 +139,25 @@ class Orchestrator:
 
         return await self._guard(session, flow())
 
+    async def _pre_research(self, ghost, manifest, question: str) -> list[dict]:
+        """Run the searches the Role Maker planned for this ghost, tagged as the ghost's evidence."""
+        plan = next((a.research for a in manifest.agents if a.id == ghost.id), None) or [
+            {"query": f"{question[:160]} {ghost.name}"}
+        ]
+        memory.evidence_tag.set({**memory.evidence_tag.get(), "agent_id": ghost.id})
+        results = await asyncio.gather(*(
+            web_research(str(p.get("query", ""))[:200], p.get("sources") or None) for p in plan[:2] if p.get("query")
+        ), return_exceptions=True)
+        results = [r for r in results if isinstance(r, dict)]
+        ghost.research_log = [{"tool": "web_research", "query": r["query"], "per_source": r["per_source"]}
+                              for r in results]
+        return results
+
     async def _guard(self, session: SessionState, flow) -> SessionState:
         usage: dict = {}
         usage_counter.set(usage)
+        calls: list = []
+        call_log.set(calls)
         memory.evidence_tag.set({"session_id": session.session_id, "round": 0})
         try:
             await flow
@@ -133,6 +168,10 @@ class Orchestrator:
             await self._status(session, SessionStatus.ERROR)
         session.usage = usage
         await self.blackboard.emit(session.session_id, "usage", usage)
+        await self.blackboard.emit(session.session_id, "call_log", calls)
+        if session.status == SessionStatus.DONE:
+            # Last event: the stream closes on "done", so usage/call_log must go out before it.
+            await self.blackboard.emit(session.session_id, "status", session.status)
 
         await db.save_session(
             session.session_id, status=session.status, question=session.problem_statement or session.input_url,
@@ -147,7 +186,7 @@ class Orchestrator:
 
         # Role Maker doesn't need the evidence, so it runs alongside research.
         manifest_task = (
-            asyncio.create_task(self.role_maker.generate_manifest(question, extra_context))
+            asyncio.create_task(self.role_maker.generate_manifest(question, extra_context, max_agents=3 if session.depth == "fast" else None))
             if route.complexity != "simple" else None
         )
 
@@ -158,15 +197,24 @@ class Orchestrator:
                 {"query": r["query"], "chunks_stored": r["chunks_stored"], "per_source": r["per_source"]} for r in results
             ])
 
-        evidence = await memory.search(question, k=8)
+        # Shared starting evidence for every ghost: gist + provenance only (full chunks x every ghost
+        # x 2 calls was the bulk of the token bill). Ghosts pull detail themselves via tools.
+        await memory.flush()
+        evidence = [{"text": e["text"][:300], "source": e["source"], "source_type": e["source_type"]}
+                    for e in await memory.search(question, k=6, where=memory.session_scope())]
         context = {"question": question, "evidence": evidence, **(extra_context or {})}
+        fast = session.depth == "fast"
+        research_mode.set("fast" if fast else "deep")
+        ghost_timeout = settings.ghost_timeout_fast if fast else settings.ghost_timeout_deep
+        # Fast still gives a sent-back ghost one redo ("if not OK, do it again"); deep allows more.
+        retries = 1 if fast else settings.max_binder_retries
 
         if route.complexity == "simple":
             answer = (await GemmaClient().generate(
                 system_prompt=DIRECT_PROMPT, user_message=f"{context}", temperature=0.3))["text"]
             session.verdict = session.summary = answer
             await self.blackboard.emit(sid, "verdict", answer)
-            await self._status(session, SessionStatus.DONE)
+            session.status = SessionStatus.DONE  # announced by _guard, after usage
             return
 
         await self._status(session, SessionStatus.ROLE_MAKING)
@@ -176,38 +224,64 @@ class Orchestrator:
 
         await self._status(session, SessionStatus.IN_COURT)
         ghosts = {g.id: g for g in AgentFactory.create_team(manifest, self.blackboard, sid)}
-        outputs = await asyncio.gather(*(g.run(CASE_TASK, context) for g in ghosts.values()), return_exceptions=True)
-        # A ghost that still fails after retries leaves the court instead of sinking the session.
+        # Gather each ghost's evidence first (all searches in parallel), then every ghost argues in ONE
+        # call instead of call -> scrape -> call. Sent-back ghosts still get tools to dig further.
+        own = dict(zip(ghosts, await asyncio.gather(
+            *(self._pre_research(g, manifest, question) for g in ghosts.values())
+        )))
+        await self.blackboard.emit(sid, "pre_research", {
+            gid: [{"query": r["query"], "per_source": r["per_source"]} for r in res] for gid, res in own.items()
+        })
+        ghost_ctx = {gid: {**context, "your_research": _evidence_digest(res)} for gid, res in own.items()}
+        outputs = await asyncio.gather(
+            *(_budget(g.run(CASE_TASK, ghost_ctx[gid], use_tools=False), ghost_timeout) for gid, g in ghosts.items()),
+            return_exceptions=True,
+        )
+        # A ghost whose call failed gets one more full try before it's left out: a dropped ghost's
+        # answer never comes back, which weakens the verdict.
+        failed = [gid for gid, out in zip(ghosts, outputs) if isinstance(out, Exception)]
+        if failed:
+            await self.blackboard.emit(sid, "ghost_retry", {"agent_ids": failed})
+            retried = await asyncio.gather(
+                *(_budget(ghosts[gid].run(CASE_TASK, ghost_ctx[gid], use_tools=False), ghost_timeout) for gid in failed),
+                return_exceptions=True,
+            )
+            outputs = list(outputs)
+            for gid, out in zip(failed, retried):
+                outputs[list(ghosts).index(gid)] = out
         for gid, out in list(zip(ghosts, outputs)):
             if isinstance(out, Exception):
-                logger.warning("Ghost %s dropped: %s", gid, out)
-                await self.blackboard.emit(sid, "ghost_dropped", {"agent_id": gid, "error": str(out)})
+                reason = f"timed out after {ghost_timeout:.0f}s" if isinstance(out, asyncio.TimeoutError) else str(out)
+                logger.warning("Ghost %s dropped: %s", gid, reason)
+                await self.blackboard.emit(sid, "ghost_dropped", {"agent_id": gid, "error": reason})
                 ghosts.pop(gid)
         if not ghosts:
             raise RuntimeError("Every ghost failed to present a case")
         cases = {gid: attach_research(parse_case(out), ghosts[gid])
                  for gid, out in zip(ghosts, (o for o in outputs if not isinstance(o, Exception)))}
 
-        for attempt in range(settings.max_binder_retries + 1):
+        for attempt in range(retries + 1):
             # Rolling window: the Soul Binder sees only evidence scraped this round and last.
+            await memory.flush()  # background embeddings must land before the rolling window is read
             window = await memory.rolling_window(question, sid, attempt)
             await self.blackboard.emit(sid, "window", {"round": attempt, "chunks": len(window),
                                                        "by_source": Counter(e["source_type"] for e in window)})
-            rulings = await self.soul_binder.rule(question, cases, window)
+            # Fast mode: rulings without hidden thinking (~45-58s -> a few seconds).
+            rulings = await self.soul_binder.rule(question, cases, window, think=not fast)
             await self.blackboard.emit(sid, "rulings", {"attempt": attempt, "rulings": {k: r.model_dump() for k, r in rulings.items()}})
             for gid, r in rulings.items():
                 cases[gid]["ruling"] = r.model_dump(exclude={"agent_id"})
 
             sent_back = [gid for gid, r in rulings.items() if r.decision == "retry"]
-            if not sent_back or attempt == settings.max_binder_retries:
+            if not sent_back or attempt == retries:
                 break
 
             memory.evidence_tag.set({"session_id": sid, "round": attempt + 1})
             redo = await asyncio.gather(*(
-                ghosts[gid].run(CASE_TASK, {
+                _budget(ghosts[gid].run(CASE_TASK, {
                     **context, "previous_case": cases[gid], "binder_guidance": rulings[gid].guidance,
                     "needs_more": rulings[gid].needs_more, "missing_sources": rulings[gid].missing_sources,
-                })
+                }), ghost_timeout)
                 for gid in sent_back
             ), return_exceptions=True)
             for gid, out in zip(sent_back, redo):
@@ -215,11 +289,19 @@ class Orchestrator:
                     cases[gid] = attach_research(parse_case(out), ghosts[gid])
 
         session.cases = cases
-        verdict = await self.soul_binder.verdict(question, cases)
-        session.verdict = verdict
-        await self.blackboard.emit(sid, "verdict", verdict)
-
         await self._status(session, SessionStatus.SUMMARIZING)
-        session.summary = await self.soul_binder.summarize(question, cases, verdict)
+        parts: list[str] = []
+        async for chunk in self.soul_binder.report(question, cases):
+            parts.append(chunk)
+            await self.blackboard.emit(sid, "report_chunk", chunk)  # live text for the UI
+        session.summary = "".join(parts)
+        # Listing + alive/dead status of every competitor comes from code (Yahoo Finance, Google News),
+        # never from the model: it had called ZestMoney (shut Dec 2023) an active competitor.
+        extra = companies_markdown(await verify_companies(session.summary))
+        if extra:
+            session.summary += extra
+            await self.blackboard.emit(sid, "report_chunk", extra)
+        session.verdict = extract_verdict(session.summary)
+        await self.blackboard.emit(sid, "verdict", session.verdict)
         await self.blackboard.emit(sid, "summary", session.summary)
-        await self._status(session, SessionStatus.DONE)
+        session.status = SessionStatus.DONE  # announced by _guard, after usage

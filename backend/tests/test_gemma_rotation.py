@@ -39,4 +39,25 @@ async def test_429_rotates_to_next_key_without_sleeping(monkeypatch):
 
     assert result["text"] == "ok"
     assert exhausted.calls == 1 and fresh.calls == 1
-    assert gemma_client._key_index == 1  # later calls start on the fresh key
+
+
+@pytest.mark.asyncio
+async def test_calls_round_robin_across_keys(monkeypatch):
+    a, b = _FakeClient(False), _FakeClient(False)
+    monkeypatch.setattr(gemma_client, "_clients", [a, b])
+    monkeypatch.setattr(gemma_client, "_key_index", 0)
+    client = gemma_client.GemmaClient("m")
+    for _ in range(4):
+        await client.generate("sys", "hi")
+    assert a.calls == 2 and b.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_pacer_skips_key_without_token_headroom(monkeypatch):
+    monkeypatch.setattr(gemma_client, "_clients", [object(), object()])
+    monkeypatch.setattr(gemma_client, "_windows", [])
+    monkeypatch.setattr(gemma_client.settings, "key_rpm", 28)
+    monkeypatch.setattr(gemma_client.settings, "key_tpm", 15000)
+    assert await gemma_client._acquire_key(0, 12000) == 0
+    # key 0 now has 12k in its window; another 12k only fits on key 1
+    assert await gemma_client._acquire_key(0, 12000) == 1

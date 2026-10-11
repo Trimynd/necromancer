@@ -24,6 +24,7 @@ class SessionState(BaseModel):
     status: SessionStatus = SessionStatus.PENDING
     input_url: str | None = None
     problem_statement: str | None = None
+    depth: str = "deep"  # "fast" | "deep"
     startup_data: dict[str, Any] | None = None
     route: dict[str, Any] | None = None
     manifest: AgentManifest | None = None

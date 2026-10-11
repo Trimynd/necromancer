@@ -2,7 +2,7 @@
 
 
 
-Run:  python test/run_court.py "your question"
+Run:  python scripts/run_court.py "your question"
 
 """
 
@@ -11,6 +11,7 @@ Run:  python test/run_court.py "your question"
 import asyncio
 
 import json
+import re
 
 import os
 
@@ -116,9 +117,13 @@ def show(t: float, e) -> None:
 
                 print(f"          guidance   -> {r['guidance'][:200]}")
 
+    elif e.event == "report_chunk":
+        # live: the report (verdict first) prints word by word as the Soul Binder writes it
+        print(d, end="", flush=True)
+
     elif e.event == "verdict":
 
-        print(f"{ts} VERDICT\n{d}")
+        print(f"\n{ts} SOUL BINDER VERDICT ready ({len(d)} chars)")
 
     elif e.event == "summary":
 
@@ -126,7 +131,17 @@ def show(t: float, e) -> None:
 
     elif e.event == "ghost_dropped":
 
-        print(f"{ts} DROPPED {d['agent_id']} (API kept failing)")
+        print(f"{ts} DROPPED {d['agent_id']} ({d['error']})")
+
+    elif e.event == "call_log":
+        print(f"\n{ts} TOKENS PER CALL")
+        print(f"          {'step':48} {'key':>3} {'input':>7} {'output':>7}")
+        for c in d:
+            print(f"          {c['step']:48} {c['key']:>3} {c['input']:>7,} {c['output']:>7,}")
+        per_key = {}
+        for c in d:
+            per_key[c["key"]] = per_key.get(c["key"], 0) + c["input"] + c["output"]
+        print(f"          tokens per key this run: {per_key}  (free tier: 16K/min per key)")
 
     elif e.event == "usage":
 
@@ -154,7 +169,7 @@ async def main() -> None:
 
     board = Blackboard()
 
-    session = SessionState(session_id="live", problem_statement=QUESTION)
+    session = SessionState(session_id="live", problem_statement=QUESTION, depth=os.getenv("DEPTH", "deep"))
 
     queue = board.subscribe("live")
 
@@ -186,7 +201,7 @@ async def main() -> None:
 
     if result.summary:
 
-        out = Path(__file__).parent / "last_summary.md"
+        out = Path(__file__).resolve().parent.parent / "data" / "reports" / f"summary_{re.sub(r'[^a-z0-9]+', '_', QUESTION.lower())[:40].strip('_')}.md"
 
         out.write_text(result.summary, encoding="utf-8")
 

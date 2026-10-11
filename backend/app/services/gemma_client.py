@@ -1,5 +1,7 @@
 import asyncio
 import re
+import time
+from collections import deque
 from contextvars import ContextVar
 from typing import Any
 
@@ -21,17 +23,61 @@ MAX_ATTEMPTS = 4
 
 # Orchestrator sets a fresh dict per session; every call adds its token counts to it.
 usage_counter: ContextVar[dict | None] = ContextVar("usage_counter", default=None)
+# Same idea, one row per call: shows exactly which step spends the tokens.
+call_log: ContextVar[list | None] = ContextVar("call_log", default=None)
 
 
-def _count_usage(model: str, response: Any) -> None:
+def _count_usage(model: str, response: Any, label: str = "", key: int = 0) -> None:
     counter, u = usage_counter.get(), getattr(response, "usage_metadata", None)
-    if counter is None or u is None:
+    if u is None:
         return
-    m = counter.setdefault(model, {"calls": 0, "input": 0, "output": 0, "thinking": 0})
-    m["calls"] += 1
-    m["input"] += u.prompt_token_count or 0
-    m["output"] += u.candidates_token_count or 0
-    m["thinking"] += u.thoughts_token_count or 0
+    if counter is not None:
+        m = counter.setdefault(model, {"calls": 0, "input": 0, "output": 0, "thinking": 0})
+        m["calls"] += 1
+        m["input"] += u.prompt_token_count or 0
+        m["output"] += u.candidates_token_count or 0
+        m["thinking"] += u.thoughts_token_count or 0
+    log = call_log.get()
+    if log is not None:
+        log.append({"step": label, "key": key + 1, "input": u.prompt_token_count or 0,
+                    "output": (u.candidates_token_count or 0) + (u.thoughts_token_count or 0)})
+
+
+def _label(system_prompt: str) -> str:
+    return system_prompt.strip().split("\n")[0][:48]
+
+
+def _quota_id(exc: Exception) -> str:
+    match = re.search(r"quotaId'?:\s*'([^']+)", str(exc))
+    return match.group(1) if match else "?"
+
+
+# ---- per-key pacing: stay just under each key's free-tier limits instead of eating 429 penalties
+_windows: list[deque] = []  # per key: (timestamp, estimated tokens) of calls in the last 60s
+
+
+async def _acquire_key(start: int, est_tokens: int) -> int:
+    """Pick the first key (round-robin from `start`) with headroom; if none, wait for one."""
+    n = len(_clients)
+    if settings.key_tpm:
+        est_tokens = min(est_tokens, settings.key_tpm)  # a huge call must still fit an empty window
+    while len(_windows) < n:
+        _windows.append(deque())
+    while True:
+        now = time.monotonic()
+        for off in range(n):
+            i = (start + off) % n
+            w = _windows[i]
+            while w and now - w[0][0] > 60:
+                w.popleft()
+            tokens = sum(t for _, t in w)
+            # The paid key (always last in the pool) shares the 30 RPM cap but not the 16K TPM one.
+            tpm = 0 if settings.use_paid and i == n - 1 else settings.key_tpm
+            if len(w) < settings.key_rpm and (not tpm or tokens + est_tokens <= tpm):
+                w.append((now, est_tokens))
+                return i
+        oldest = min(w[0][0] for w in _windows[:n] if w)
+        await asyncio.sleep(max(0.5, 60 - (now - oldest)))
 _RETRY_RE = re.compile(r"retry in ([\d.]+)s", re.IGNORECASE)
 
 
@@ -56,6 +102,11 @@ def _build_tool(schema: dict) -> types.Tool:
     )
 
 
+def _grounding_sources(response: Any) -> list[dict]:
+    meta = getattr((getattr(response, "candidates", None) or [None])[0], "grounding_metadata", None)
+    return [{"url": c.web.uri, "title": c.web.title} for c in (getattr(meta, "grounding_chunks", None) or []) if c.web]
+
+
 def _extract_function_calls(response: Any) -> list[dict]:
     calls = getattr(response, "function_calls", None)
     if calls:
@@ -78,7 +129,7 @@ _key_index = 0  # shared across all GemmaClients: rotate once, everyone moves of
 
 def _client_pool() -> list[genai.Client]:
     if not _clients:
-        _clients.extend(genai.Client(api_key=k) for k in settings.gemini_api_keys)
+        _clients.extend(genai.Client(api_key=k) for k in settings.active_api_keys)
     return _clients
 
 
@@ -86,10 +137,10 @@ class GemmaClient:
     """Thin async wrapper around the Gemini API for calling Gemma models."""
 
     def __init__(self, model: str | None = None):
-        if not settings.gemini_api_key:
+        if not settings.active_api_keys:
             raise GemmaAPIError(
-                "GEMINI_API_KEY is not set. Copy backend/.env.example to backend/.env "
-                "and fill it in."
+                "No API key: set gemini_key (free) in backend/.env, or gemini_unlimited plus "
+                "unlimited=true for the paid key."
             )
         _client_pool()
         self.model = model or settings.gemma_model_specialist
@@ -103,6 +154,7 @@ class GemmaClient:
         max_output_tokens: int = 4096,
         think: bool = False,
         tool_mode: str = "AUTO",
+        google_search: bool = False,
     ) -> dict:
         config = types.GenerateContentConfig(
             system_instruction=system_prompt,
@@ -113,7 +165,10 @@ class GemmaClient:
             thinking_config=types.ThinkingConfig(thinking_level="high" if think else "minimal"),
         )
 
-        if tools:
+        if google_search:
+            # Gemma 4 supports Google's own search as a built-in tool (grounding).
+            config.tools = [types.Tool(google_search=types.GoogleSearch())]
+        elif tools:
             config.tools = [_build_tool(t) for t in tools]
             config.tool_config = types.ToolConfig(
                 function_calling_config=types.FunctionCallingConfig(mode=tool_mode)
@@ -122,25 +177,30 @@ class GemmaClient:
         global _key_index
         pool = _client_pool()
         rotations_left = len(pool) - 1
+        # Round-robin: every call starts on the next key, so N keys = N x the per-minute quota.
+        start = _key_index
+        _key_index += 1
+        est = (len(system_prompt) + len(user_message)) // 4  # the free-tier TPM quota counts INPUT tokens only
         attempt = 0
         while True:
             attempt += 1
-            client = pool[_key_index % len(pool)]
+            idx = await _acquire_key(start, est)
+            client = pool[idx]
             try:
                 response = await client.aio.models.generate_content(
                     model=self.model,
                     contents=user_message,
                     config=config,
                 )
-                _count_usage(self.model, response)
+                _count_usage(self.model, response, _label(system_prompt), idx)
                 break
             except errors.APIError as exc:
                 if exc.code == 429 and rotations_left > 0:
                     # Another account's quota is free: switch key and retry immediately, no sleep.
                     rotations_left -= 1
-                    if pool[_key_index % len(pool)] is client:
-                        _key_index += 1
-                    logger.warning("429 on key #%d, rotating to key #%d", pool.index(client) + 1, _key_index % len(pool) + 1)
+                    start = idx + 1
+                    logger.warning("429 on key #%d (%s), rotating to key #%d",
+                                   idx + 1, _quota_id(exc), start % len(pool) + 1)
                     continue
                 if (exc.code == 429 or exc.code >= 500) and attempt < MAX_ATTEMPTS + len(pool) - 1:
                     delay = _retry_delay(exc, attempt)
@@ -155,5 +215,43 @@ class GemmaClient:
 
         return {
             "text": response.text or "",
+            "sources": _grounding_sources(response),
             "function_calls": _extract_function_calls(response),
         }
+
+
+    async def stream(self, system_prompt: str, user_message: str, temperature: float = 0.3,
+                     max_output_tokens: int = 8192, think: bool = False):
+        """Yield text chunks as Gemma writes them, so the UI shows the report live.
+        Key rotation applies until the first chunk arrives; after that we're committed."""
+        global _key_index
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt, temperature=temperature, max_output_tokens=max_output_tokens,
+            thinking_config=types.ThinkingConfig(thinking_level="high" if think else "minimal"),
+        )
+        pool = _client_pool()
+        start = _key_index
+        _key_index += 1
+        est = (len(system_prompt) + len(user_message)) // 4  # the free-tier TPM quota counts INPUT tokens only
+        tries = len(pool) + MAX_ATTEMPTS
+        for attempt in range(tries):
+            idx = await _acquire_key(start + attempt, est)
+            client = pool[idx]
+            last = None
+            try:
+                async for chunk in await client.aio.models.generate_content_stream(
+                    model=self.model, contents=user_message, config=config
+                ):
+                    last = chunk
+                    if chunk.text:
+                        yield chunk.text
+                if last is not None:
+                    _count_usage(self.model, last, _label(system_prompt), idx)
+                return
+            except errors.APIError as exc:
+                if last is None and (exc.code == 429 or exc.code >= 500) and attempt < tries - 1:
+                    if attempt >= len(pool) - 1:  # every key tried: now actually wait
+                        await asyncio.sleep(_retry_delay(exc, attempt))
+                    logger.warning("%s on stream (key #%d, %s), retrying", exc.code, idx + 1, _quota_id(exc))
+                    continue
+                raise GemmaAPIError(str(exc)) from exc

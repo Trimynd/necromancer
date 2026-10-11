@@ -16,6 +16,8 @@ class Blackboard:
     def __init__(self):
         self._store: dict[str, dict[str, Any]] = defaultdict(dict)
         self._subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
+        # Every event of a session, so a page that connects late (or reloads) replays the whole run.
+        self._history: dict[str, list[BlackboardEvent]] = defaultdict(list)
 
     async def write(self, session_id: str, agent_id: str, key: str, value: Any) -> None:
         self._store[session_id][f"{agent_id}:{key}"] = value
@@ -30,11 +32,14 @@ class Blackboard:
 
     async def emit(self, session_id: str, event: str, data: Any) -> None:
         payload = BlackboardEvent(event=event, data=data)
+        self._history[session_id].append(payload)
         for queue in self._subscribers[session_id]:
             queue.put_nowait(payload)
 
     def subscribe(self, session_id: str) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue()
+        for past in self._history[session_id]:
+            queue.put_nowait(past)
         self._subscribers[session_id].append(queue)
         return queue
 
@@ -46,3 +51,4 @@ class Blackboard:
     def clear_session(self, session_id: str) -> None:
         self._store.pop(session_id, None)
         self._subscribers.pop(session_id, None)
+        self._history.pop(session_id, None)

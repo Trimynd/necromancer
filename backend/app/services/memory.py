@@ -33,6 +33,10 @@ CHUNK_OVERLAP = 40
 evidence_tag: ContextVar[dict] = ContextVar("evidence_tag", default={})
 
 _lock = threading.Lock()
+# One embedding job at a time: parallel ONNX runs on CPU just fight over the same cores.
+_embed_lock = threading.Lock()
+# Stores still embedding in the background (see add_in_background / flush).
+_pending: set[asyncio.Task] = set()
 
 
 @lru_cache
@@ -91,7 +95,8 @@ def _add_sync(docs: list[dict], tag: dict) -> int:
     if not texts:
         return 0
 
-    vecs = _embed(texts)
+    with _embed_lock:
+        vecs = _embed(texts)
     with _lock:
         if store.index is None:
             store.index = faiss.IndexFlatIP(vecs.shape[1])
@@ -141,6 +146,20 @@ async def add(docs: list[dict]) -> int:
     return await asyncio.to_thread(_add_sync, docs, dict(evidence_tag.get()))
 
 
+def add_in_background(docs: list[dict]) -> None:
+    """Embed + store without making the caller wait (BGE on CPU: ~170ms per chunk).
+    The evidence tag is captured now, so chunks stay tagged with the right session/round/agent."""
+    task = asyncio.create_task(add(docs))
+    _pending.add(task)
+    task.add_done_callback(_pending.discard)
+
+
+async def flush() -> None:
+    """Wait for background stores; call before anything that must see all evidence (the rolling window)."""
+    if _pending:
+        await asyncio.gather(*list(_pending), return_exceptions=True)
+
+
 async def search(query: str, k: int = 6, where: dict | None = None) -> list[dict]:
     return await asyncio.to_thread(_search_sync, query, k, where)
 
@@ -150,9 +169,16 @@ async def rolling_window(query: str, session_id: str, round_num: int, k: int = 2
     return await search(query, k, where={"session_id": session_id, "round": [round_num, round_num - 1]})
 
 
+def session_scope(where: dict | None = None) -> dict | None:
+    """Limit a search to the current session's evidence, so one question's research never leaks
+    into another's answer. Outside a session (scripts/tests) the search stays global."""
+    sid = evidence_tag.get().get("session_id")
+    return {**(where or {}), "session_id": sid} if sid else where
+
+
 async def search_memory(query: str, k: int = 6) -> dict:
-    """Tool handler: agents call this to pull evidence from memory."""
-    return {"query": query, "evidence": await search(query, k)}
+    """Tool handler: agents call this to pull evidence from memory (this session only)."""
+    return {"query": query, "evidence": await search(query, k, where=session_scope())}
 
 
 if __name__ == "__main__":

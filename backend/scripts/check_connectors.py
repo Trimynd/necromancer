@@ -1,6 +1,6 @@
 """Live check of free data connectors (no signup, no billing). Phone-shop-in-Pune scenario.
 
-Run:  python tests/check_connectors.py
+Run:  python scripts/check_connectors.py
 Each check prints OK/FAIL, latency and a sample of what an agent would get.
 """
 

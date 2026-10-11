@@ -7,7 +7,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-ROUTER_PROMPT = """You triage questions for Necromancer, a fintech multi-agent platform.
+ROUTER_PROMPT = """You triage questions for Necromancer, a multi-agent platform that analyses any business, idea or question.
 
 Decide:
 - topic: short label of what the question is about.

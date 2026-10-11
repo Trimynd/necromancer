@@ -38,3 +38,12 @@ async def test_unsubscribe_stops_delivery():
     await bb.emit("session-1", "status", "running")
 
     assert queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_late_subscriber_gets_full_history():
+    board = Blackboard()
+    await board.emit("s", "status", "routing")
+    await board.emit("s", "route", {"complexity": "complex"})
+    q = board.subscribe("s")
+    assert [q.get_nowait().event for _ in range(2)] == ["status", "route"]

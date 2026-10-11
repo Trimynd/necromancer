@@ -17,10 +17,11 @@ TOOL_REGISTRY: dict[str, dict] = {
                 "sources": {
                     "type": "array",
                     "items": {"type": "string", "enum": [
-                        "web", "news", "reddit", "hackernews", "wikipedia", "finance", "jobs", "reviews"]},
+                        "web", "news", "reddit", "hackernews", "wikipedia", "finance", "jobs", "reviews", "economy", "google"]},
                     "description": (
                         "Defaults to web+news+reddit+hackernews+wikipedia. Add finance (listed-company numbers), "
-                        "jobs (hiring signals) or reviews (customer sentiment) when your role needs them."
+                        "jobs (hiring signals), reviews (customer sentiment), economy (India macro: GDP, inflation) or google (Google Search, best "
+                        "for fresh facts and live numbers, ~25s slower) when your role needs them."
                     ),
                 },
             },

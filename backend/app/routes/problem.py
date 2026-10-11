@@ -1,3 +1,4 @@
+from typing import Literal
 import asyncio
 import uuid
 
@@ -13,6 +14,7 @@ router = APIRouter(tags=["problem"])
 
 class ProblemRequest(BaseModel):
     problem_statement: str = Field(min_length=1, max_length=4000)
+    depth: Literal["fast", "deep"] = "deep"
 
 
 class ProblemResponse(BaseModel):
@@ -23,7 +25,7 @@ class ProblemResponse(BaseModel):
 @router.post("/api/problem", response_model=ProblemResponse)
 async def problem(req: ProblemRequest) -> ProblemResponse:
     session_id = str(uuid.uuid4())
-    session = SessionState(session_id=session_id, problem_statement=req.problem_statement)
+    session = SessionState(session_id=session_id, problem_statement=req.problem_statement, depth=req.depth)
     sessions[session_id] = session
 
     orchestrator = Orchestrator(blackboard)
